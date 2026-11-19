@@ -1,0 +1,44 @@
+plugins {
+    id 'com.android.application' version '8.7.3'
+}
+
+// CI signs every build with one fixed key (stored as repository secrets), so new builds install
+// over old ones. Local builds without these variables use the usual Android debug key.
+def ciKeystore = System.getenv('SIGNING_KEYSTORE')
+
+android {
+    namespace 'com.subledger.mobile'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.subledger.mobile'
+        minSdk 26
+        targetSdk 34
+        versionCode((System.getenv('GITHUB_RUN_NUMBER') ?: '1') as int)
+        versionName '0.1.0'
+    }
+
+    signingConfigs {
+        if (ciKeystore) {
+            ci {
+                storeFile file(ciKeystore)
+                storePassword System.getenv('SIGNING_PASSWORD')
+                keyAlias System.getenv('SIGNING_ALIAS')
+                keyPassword System.getenv('SIGNING_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            if (ciKeystore) {
+                signingConfig signingConfigs.ci
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
