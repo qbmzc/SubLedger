@@ -15,6 +15,8 @@ Requires the Android 35 SDK and JDK 17+.
 ./gradlew :app:lint              # Android lint (default config, no custom rules)
 ```
 
+CI: `.github/workflows/build.yml` runs `assembleDebug` on pushes to `main` (APK uploaded as an artifact) and publishes a GitHub Release for `v*` tags. When `SIGNING_KEYSTORE` is set (CI decodes it from repository secrets), `app/build.gradle` signs the debug build with that fixed key so updates install over each other; `versionCode` comes from `GITHUB_RUN_NUMBER`. Never commit keystores (`*.jks` is gitignored).
+
 There are no tests in the project yet (no `src/test` or `src/androidTest`, no test dependencies).
 
 Without an Android SDK, you can still type-check all sources against Robolectric's framework jar (`org.robolectric:android-all:14-robolectric-10818077` from Maven Central, ~138 MB) with a stub `R` class. The stub must declare every resource the code references: `drawable.ic_notification`, `drawable.ic_ledger`, `layout.widget`, and the `id.widget_*` ids from `res/layout/widget.xml`.

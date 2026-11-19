@@ -41,4 +41,6 @@
 
 Windows 上运行 `gradlew.bat :app:assembleDebug`。输出路径为 `app/build/outputs/apk/debug/app-debug.apk`。
 
+GitHub Actions（`.github/workflows/build.yml`）在每次推送到 `main` 时构建 APK 并作为 Artifact 上传；推送 `v*` 标签时另外发布 Release 附带 APK。CI 构建使用仓库 Secrets（`SIGNING_KEYSTORE_BASE64`、`SIGNING_ALIAS`、`SIGNING_PASSWORD`）中的固定签名密钥，因此新版本可直接覆盖安装；本地构建仍使用 Android 调试密钥，与 CI 版本不能互相覆盖安装。
+
 单独提供的体验 APK 使用测试签名。若改用自己构建的版本，先在「设置」中导出备份（ZIP，含附件），再卸载旧版、安装新版并导入备份。日后为同一安装包制作更新时，请保管并持续使用同一签名密钥。
