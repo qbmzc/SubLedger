@@ -202,6 +202,17 @@ abstract class LedgerActivity extends Activity {
         return true;
     }
 
+    /**
+     * Round icon for a subscription, or a badge from {@code title} when the subscription was
+     * deleted ({@code entry} null). Decorative: the title is always shown next to it.
+     */
+    ImageView iconView(Subscription entry, String title, int size) {
+        ImageView view = new ImageView(this);
+        view.setImageDrawable(IconDrawable.of(this, entry, title, dp(size), colors.line));
+        view.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        return view;
+    }
+
     /** Horizontal row of attachment thumbnails for one owner, ending with an add button. */
     final class AttachmentStrip extends HorizontalScrollView {
         private final String ownerId;

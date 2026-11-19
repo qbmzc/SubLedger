@@ -14,7 +14,7 @@ import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
 /**
- * ZIP backup: {@code ledger.json} plus {@code attachments/<id>.jpg|pdf}. Reading only accepts
+ * ZIP backup: {@code ledger.json} plus {@code attachments/<id>.jpg|pdf} (attachments and icon pictures). Reading only accepts
  * those exact names, so a crafted archive cannot write outside the staging directory.
  */
 final class BackupZip {
@@ -31,20 +31,20 @@ final class BackupZip {
         return head.length >= 4 && head[0] == 'P' && head[1] == 'K' && head[2] == 3 && head[3] == 4;
     }
 
-    /** Writes the ledger JSON and every attachment file that exists in {@code folder}. */
-    static void write(OutputStream out, String ledgerJson, File folder, Collection<Attachment> attachments)
+    /** Writes the ledger JSON and each named file that exists in {@code folder}. */
+    static void write(OutputStream out, String ledgerJson, File folder, Collection<String> fileNames)
             throws IOException {
         ZipOutputStream zip = new ZipOutputStream(out);
         zip.putNextEntry(new ZipEntry(LEDGER));
         zip.write(ledgerJson.getBytes(StandardCharsets.UTF_8));
         zip.closeEntry();
         byte[] buffer = new byte[64 * 1024];
-        for (Attachment attachment : attachments) {
-            File file = new File(folder, attachment.fileName());
-            if (!file.isFile()) {
+        for (String name : fileNames) {
+            File file = new File(folder, name);
+            if (!name.matches(Attachment.FILE_PATTERN) || !file.isFile()) {
                 continue;
             }
-            zip.putNextEntry(new ZipEntry(FOLDER + attachment.fileName()));
+            zip.putNextEntry(new ZipEntry(FOLDER + name));
             try (InputStream in = new FileInputStream(file)) {
                 int count;
                 while ((count = in.read(buffer)) != -1) {

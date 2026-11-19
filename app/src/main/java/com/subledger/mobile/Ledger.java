@@ -10,6 +10,7 @@ import java.util.Currency;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -152,11 +153,37 @@ final class Ledger {
         return new Ledger(subscriptions, wallets, payments, topUps, list);
     }
 
-    /** Keeps only the attachments accepted by {@code keep}, e.g. those whose file is present. */
-    Ledger keepAttachments(Predicate<Attachment> keep) {
+    /**
+     * Keeps only the attachments and icon pictures whose file name {@code present} accepts, e.g.
+     * those whose file came with a backup. Subscriptions with a missing picture fall back to a badge.
+     */
+    Ledger keepFiles(Predicate<String> present) {
         List<Attachment> list = new ArrayList<>(attachments);
-        list.removeIf(keep.negate());
-        return new Ledger(subscriptions, wallets, payments, topUps, list);
+        list.removeIf(attachment -> !present.test(attachment.fileName()));
+        List<Subscription> entries = new ArrayList<>();
+        for (Subscription entry : subscriptions) {
+            if (entry.iconFile() != null && !present.test(entry.iconFile())) {
+                Subscription.Builder b = entry.toBuilder();
+                b.iconImage = null;
+                entry = b.build();
+            }
+            entries.add(entry);
+        }
+        return new Ledger(entries, wallets, payments, topUps, list);
+    }
+
+    /** Names of every stored file the ledger refers to: attachments and icon pictures. */
+    Set<String> fileNames() {
+        Set<String> names = new LinkedHashSet<>();
+        for (Attachment attachment : attachments) {
+            names.add(attachment.fileName());
+        }
+        for (Subscription entry : subscriptions) {
+            if (entry.iconFile() != null) {
+                names.add(entry.iconFile());
+            }
+        }
+        return names;
     }
 
     Ledger removeAttachment(String id) {

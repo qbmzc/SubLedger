@@ -5,6 +5,7 @@ import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
@@ -17,6 +18,7 @@ import android.view.WindowManager;
 import android.widget.AutoCompleteTextView;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
@@ -46,6 +48,7 @@ public final class MainActivity extends LedgerActivity {
     private static final int SAVE_BACKUP = 10;
     private static final int OPEN_BACKUP = 11;
     private static final int NOTIFICATIONS = 12;
+    private static final int PICK_ICON = 13;
     private static final int MAX_BACKUP_BYTES = 8 * 1024 * 1024;
     private static final String[] FILTERS = {"进行中", "近 30 天", "已停止"};
     private static final String[] CATEGORIES = {"AI", "影音", "音乐", "云存储", "工具", "游戏", "学习", "办公", "其他"};
@@ -343,6 +346,12 @@ public final class MainActivity extends LedgerActivity {
         card.setBackground(ripple(colors.card, 18));
         card.setOnClickListener(view -> details(entry));
         card.setFocusable(true);
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(40), dp(40));
+        iconParams.rightMargin = dp(12);
+        card.addView(iconView(entry, entry.title, 40), iconParams);
+        LinearLayout content = column();
+        card.addView(content, new LinearLayout.LayoutParams(0, -2, 1f));
         LinearLayout top = row();
         top.setGravity(Gravity.TOP);
         TextView name = label(entry.title, 17, colors.ink, true);
@@ -352,8 +361,8 @@ public final class MainActivity extends LedgerActivity {
         TextView price = label(money(entry.currency, entry.amount), 16, colors.green, true);
         price.setGravity(Gravity.END);
         top.addView(price);
-        card.addView(top);
-        gap(card, 4);
+        content.addView(top);
+        gap(content, 4);
         List<String> parts = new ArrayList<>();
         parts.add(entry.cycle.label);
         parts.add(entry.mode.label);
@@ -376,9 +385,9 @@ public final class MainActivity extends LedgerActivity {
         } else if (!entry.payment.isEmpty()) {
             parts.add(entry.payment);
         }
-        card.addView(label(String.join(" · ", parts), 13, colors.muted, false));
+        content.addView(label(String.join(" · ", parts), 13, colors.muted, false));
         if (entry.mode != Subscription.Mode.ENDED) {
-            gap(card, 7);
+            gap(content, 7);
             LocalDate next = entry.nextDate(today);
             long days = ChronoUnit.DAYS.between(today, next);
             String relative = days < 0 ? "已过期" : days == 0 ? "今天" : days + " 天后";
@@ -389,7 +398,7 @@ public final class MainActivity extends LedgerActivity {
                 line += "  ·  余额不足";
             }
             boolean urgent = days <= 7 || walletShort(entry);
-            card.addView(label(line, 13, urgent ? colors.amber : colors.green, true));
+            content.addView(label(line, 13, urgent ? colors.amber : colors.green, true));
         }
         return card;
     }
@@ -461,6 +470,7 @@ public final class MainActivity extends LedgerActivity {
         ScrollView scroll = new ScrollView(this);
         scroll.addView(body);
         AlertDialog.Builder dialog = new AlertDialog.Builder(this).setTitle(entry.title)
+                .setIcon(IconDrawable.of(this, entry, entry.title, dp(32), colors.line))
                 .setView(scroll)
                 .setPositiveButton("编辑", (whichDialog, button) -> editor(entry, false))
                 .setNegativeButton("关闭", null);
@@ -499,6 +509,26 @@ public final class MainActivity extends LedgerActivity {
                 ? claudeTemplate ? "Claude Pro" : "" : entry.title,
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES, 100);
         addField(fields, "订阅名称", name);
+        IconChoice icon = new IconChoice(entry);
+        ImageView iconPreview = new ImageView(this);
+        iconPreview.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        Runnable refreshIcon = () -> iconPreview.setImageDrawable(icon.drawable(fieldValue(name), 48));
+        LinearLayout iconRow = row();
+        iconRow.setGravity(Gravity.CENTER_VERTICAL);
+        iconRow.addView(iconPreview, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        LinearLayout.LayoutParams changeParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        changeParams.leftMargin = dp(12);
+        iconRow.addView(action("更换图标", colors.line, colors.green,
+                () -> iconDialog(icon, fieldValue(name), refreshIcon)), changeParams);
+        addField(fields, "图标", iconRow);
+        refreshIcon.run();
+        name.addTextChangedListener(new TextWatcher() {
+            public void beforeTextChanged(CharSequence text, int start, int count, int after) { }
+            public void onTextChanged(CharSequence text, int start, int before, int count) {
+                refreshIcon.run();
+            }
+            public void afterTextChanged(Editable text) { }
+        });
         EditText amount = input("填写账单金额", entry == null ? "" : entry.amount.toPlainString(),
                 InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL, 20);
         addField(fields, "单次金额", amount);
@@ -595,6 +625,8 @@ public final class MainActivity extends LedgerActivity {
             builder.setNeutralButton("删除", (dialog, button) -> confirmDelete(entry));
         }
         AlertDialog dialog = builder.create();
+        // A picture picked in this editor but not saved is deleted.
+        dialog.setOnDismissListener(closed -> icon.discardPicked());
         dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
                 | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
         dialog.show();
@@ -668,6 +700,9 @@ public final class MainActivity extends LedgerActivity {
             b.costCurrency = costValue == null ? null : costCurrency;
             b.splitWays = ways;
             b.note = fieldValue(note);
+            b.iconText = icon.text;
+            b.iconColor = icon.color;
+            b.iconImage = icon.image;
             if (entry != null && (entry.amount.compareTo(value) != 0 || !entry.currency.equals(code))) {
                 b.prices.add(new Subscription.PricePoint(LocalDate.now(), entry.amount, entry.currency));
                 while (b.prices.size() > Subscription.MAX_PRICES) {
@@ -680,6 +715,13 @@ public final class MainActivity extends LedgerActivity {
             } catch (IllegalArgumentException ex) {
                 toast("请检查金额和实际成本的小数位、日期和提醒天数（0–90）");
                 return;
+            }
+            if (icon.image != null && icon.image.equals(icon.picked)) {
+                if (!AttachmentStore.moveIcon(this, icon.image)) {
+                    toast("无法保存图标图片，请重新选择");
+                    return;
+                }
+                icon.picked = null;
             }
             boolean first = ledger.subscriptions.isEmpty();
             boolean resetReminder = entry != null && (entry.reminderDays != updated.reminderDays
@@ -695,6 +737,217 @@ public final class MainActivity extends LedgerActivity {
                 }
             }
         });
+    }
+
+    /** Icon settings being edited in the subscription editor. */
+    private final class IconChoice {
+        String text;
+        Integer color;
+        String image;
+        /** Picture picked in this editor and still in the incoming folder. */
+        String picked;
+
+        IconChoice(Subscription entry) {
+            if (entry != null) {
+                text = entry.iconText;
+                color = entry.iconColor;
+                image = entry.iconImage;
+            }
+        }
+
+        IconDrawable drawable(String title, int size) {
+            return new IconDrawable(Icons.badge(title.isEmpty() ? "?" : title, text, color),
+                    AttachmentStore.icon(MainActivity.this, image), dp(size), colors.line, dp(1));
+        }
+
+        void setImage(String id) {
+            discardPicked();
+            picked = id;
+            image = id;
+        }
+
+        void removeImage() {
+            discardPicked();
+            image = null;
+        }
+
+        void discardPicked() {
+            if (picked != null) {
+                if (picked.equals(image)) {
+                    image = null;
+                }
+                AttachmentStore.discardIcon(MainActivity.this, picked);
+                picked = null;
+            }
+        }
+    }
+
+    /** Edits {@code icon} in place; {@code changed} refreshes the editor's preview. */
+    private void iconDialog(IconChoice icon, String title, Runnable changed) {
+        LinearLayout body = column();
+        body.setPadding(dp(22), dp(8), dp(22), dp(8));
+        ImageView preview = new ImageView(this);
+        preview.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(dp(72), dp(72));
+        previewParams.gravity = Gravity.CENTER_HORIZONTAL;
+        body.addView(preview, previewParams);
+        LinearLayout pictureRow = row();
+        LinearLayout swatches = column();
+        Icons.Preset preset = Icons.preset(title);
+        String autoText = preset != null ? preset.text : Icons.initial(title.isEmpty() ? "?" : title);
+        EditText text = input("留空使用「" + autoText + "」", icon.text == null ? "" : icon.text,
+                InputType.TYPE_CLASS_TEXT, Icons.MAX_TEXT);
+        EditText hex = input("例如 #D97757", icon.color == null ? "" : Icons.formatColor(icon.color),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS, 7);
+
+        Runnable[] update = new Runnable[1];
+        update[0] = () -> {
+            preview.setImageDrawable(icon.drawable(title, 72));
+            pictureRow.removeAllViews();
+            pictureRow.addView(action(icon.image == null ? "从相册选图" : "换一张图片", colors.line, colors.green,
+                    () -> pickIcon(icon, update[0])), new LinearLayout.LayoutParams(0, dp(46), 1f));
+            if (icon.image != null) {
+                LinearLayout.LayoutParams removeParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+                removeParams.leftMargin = dp(8);
+                pictureRow.addView(action("移除图片", colors.line, colors.amber, () -> {
+                    icon.removeImage();
+                    update[0].run();
+                }), removeParams);
+            }
+            renderSwatches(swatches, icon, color -> {
+                icon.color = color;
+                hex.setText(color == null ? "" : Icons.formatColor(color));
+                update[0].run();
+            });
+            changed.run();
+        };
+
+        gap(body, 12);
+        body.addView(pictureRow);
+        body.addView(label("设置图片后显示图片，移除后显示下面的文字图标。", 12, colors.muted, false));
+        addField(body, "图标文字（最多 " + Icons.MAX_TEXT + " 个字符）", text);
+        gap(body, 10);
+        body.addView(label("颜色", 13, colors.muted, true));
+        gap(body, 6);
+        body.addView(swatches);
+        addField(body, "自定义颜色（选填）", hex);
+        text.addTextChangedListener(new TextWatcher() {
+            public void beforeTextChanged(CharSequence value, int start, int count, int after) { }
+            public void onTextChanged(CharSequence value, int start, int before, int count) {
+                icon.text = Icons.validText(value.toString());
+                update[0].run();
+            }
+            public void afterTextChanged(Editable value) { }
+        });
+        hex.addTextChangedListener(new TextWatcher() {
+            public void beforeTextChanged(CharSequence value, int start, int count, int after) { }
+            public void onTextChanged(CharSequence value, int start, int before, int count) {
+                Integer color = Icons.parseColor(value.toString());
+                if (color != null && !color.equals(icon.color)) {
+                    icon.color = color;
+                    update[0].run();
+                }
+            }
+            public void afterTextChanged(Editable value) { }
+        });
+        update[0].run();
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(body);
+        new AlertDialog.Builder(this).setTitle("图标").setView(scroll)
+                .setPositiveButton("完成", null)
+                .setNeutralButton("恢复默认", (dialog, button) -> {
+                    icon.text = null;
+                    icon.color = null;
+                    icon.removeImage();
+                    changed.run();
+                }).show();
+    }
+
+    private interface ColorSelection {
+        void select(Integer color);
+    }
+
+    /** Colour circles in rows of six, starting with "自动"; the selected one is outlined. */
+    private void renderSwatches(LinearLayout grid, IconChoice icon, ColorSelection selection) {
+        grid.removeAllViews();
+        int perRow = 6;
+        LinearLayout line = null;
+        int total = Icons.SWATCHES.length + 1;
+        for (int i = -1; i < Icons.SWATCHES.length; i++) {
+            if ((i + 1) % perRow == 0) {
+                line = row();
+                grid.addView(line, new LinearLayout.LayoutParams(-1, dp(44)));
+            }
+            Integer color = i < 0 ? null : Integer.valueOf(Icons.SWATCHES[i]);
+            boolean selected = color == null ? icon.color == null : color.equals(icon.color);
+            GradientDrawable dot = new GradientDrawable();
+            dot.setShape(GradientDrawable.OVAL);
+            dot.setColor(color == null ? colors.card : 0xFF000000 | color);
+            dot.setStroke(selected ? dp(3) : dp(1), selected ? colors.green : colors.line);
+            TextView swatch = new TextView(this);
+            swatch.setBackground(dot);
+            swatch.setGravity(Gravity.CENTER);
+            if (color == null) {
+                swatch.setText("自动");
+                swatch.setTextSize(11);
+                swatch.setTextColor(colors.ink);
+            }
+            swatch.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            // Equal cells keep six circles per row on narrow dialogs; the whole cell is the tap target.
+            LinearLayout cell = row();
+            cell.setGravity(Gravity.CENTER);
+            cell.setContentDescription((color == null ? "自动颜色" : Icons.formatColor(color))
+                    + (selected ? "，已选择" : ""));
+            cell.setOnClickListener(view -> selection.select(color));
+            cell.addView(swatch, new LinearLayout.LayoutParams(dp(36), dp(36)));
+            line.addView(cell, new LinearLayout.LayoutParams(0, -1, 1f));
+        }
+        for (int i = total % perRow; i > 0 && i < perRow; i++) {
+            line.addView(new View(this), new LinearLayout.LayoutParams(0, -1, 1f));
+        }
+    }
+
+    /** Icon whose picture is being picked, and what to refresh afterwards; null when idle. */
+    private IconChoice pickingIcon;
+    private Runnable pickedIcon;
+
+    private void pickIcon(IconChoice icon, Runnable after) {
+        pickingIcon = icon;
+        pickedIcon = after;
+        startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"), PICK_ICON);
+    }
+
+    private void finishPickingIcon(android.net.Uri uri) {
+        IconChoice icon = pickingIcon;
+        Runnable after = pickedIcon;
+        pickingIcon = null;
+        pickedIcon = null;
+        if (icon == null) {
+            // The editor was closed (e.g. the activity was recreated) while picking.
+            toast("请重新打开编辑并选择图片");
+            return;
+        }
+        new Thread(() -> {
+            String id;
+            try {
+                id = AttachmentStore.copyIcon(this, uri);
+            } catch (IOException ex) {
+                id = null;
+            }
+            String picked = id;
+            runOnUiThread(() -> {
+                if (picked == null) {
+                    toast("无法读取这张图片");
+                } else if (isFinishing() || isDestroyed()) {
+                    AttachmentStore.discardIcon(this, picked);
+                } else {
+                    icon.setImage(picked);
+                    after.run();
+                }
+            });
+        }, "icon-import").start();
     }
 
     private static boolean validCurrency(String code) {
@@ -757,10 +1010,16 @@ public final class MainActivity extends LedgerActivity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            if (requestCode == PICK_ICON) {
+                pickingIcon = null;
+                pickedIcon = null;
+            }
             return;
         }
         android.net.Uri uri = data.getData();
-        if (requestCode == SAVE_BACKUP) {
+        if (requestCode == PICK_ICON) {
+            finishPickingIcon(uri);
+        } else if (requestCode == SAVE_BACKUP) {
             Ledger snapshot = ledgerStore().load();
             File folder = AttachmentStore.folder(this);
             new Thread(() -> {
@@ -768,7 +1027,7 @@ public final class MainActivity extends LedgerActivity {
                     if (stream == null) {
                         throw new IOException("无法打开备份文件");
                     }
-                    BackupZip.write(stream, LedgerStore.encode(snapshot), folder, snapshot.attachments);
+                    BackupZip.write(stream, LedgerStore.encode(snapshot), folder, snapshot.fileNames());
                     runOnUiThread(() -> toast("备份已导出（含 " + snapshot.attachments.size() + " 个附件）"));
                 } catch (Exception ex) {
                     runOnUiThread(() -> toast("导出失败，请检查文件位置和可用空间"));
@@ -786,10 +1045,9 @@ public final class MainActivity extends LedgerActivity {
                         stream.unread(head, 0, read);
                     }
                     String json = BackupZip.isZip(head) ? BackupZip.read(stream, staging) : readJson(stream);
-                    // Keep attachment records only when their file came with the backup or is already here.
-                    Ledger imported = LedgerStore.decode(json).keepAttachments(attachment ->
-                            new File(staging, attachment.fileName()).isFile()
-                                    || new File(folder, attachment.fileName()).isFile());
+                    // Keep attachments and icon pictures only when their file came with the backup or is already here.
+                    Ledger imported = LedgerStore.decode(json).keepFiles(name ->
+                            new File(staging, name).isFile() || new File(folder, name).isFile());
                     runOnUiThread(() -> confirmImport(imported, staging));
                 } catch (Exception ex) {
                     AttachmentStore.deleteTree(staging);

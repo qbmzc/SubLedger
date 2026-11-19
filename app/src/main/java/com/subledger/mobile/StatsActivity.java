@@ -302,9 +302,20 @@ public final class StatsActivity extends LedgerActivity {
             detail = share.count + " 项";
         }
         item.addView(label(detail + " · 占 " + percent(share.monthly, stats.monthly), 12, colors.muted, false));
-        item.setContentDescription(share.label + "，每月 " + money(stats.base, share.monthly)
-                + "，" + detail + "，占 " + percent(share.monthly, stats.monthly));
-        return item;
+        String description = share.label + "，每月 " + money(stats.base, share.monthly)
+                + "，" + detail + "，占 " + percent(share.monthly, stats.monthly);
+        if (share.entry == null) {
+            item.setContentDescription(description);
+            return item;
+        }
+        LinearLayout withIcon = row();
+        withIcon.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(32), dp(32));
+        iconParams.rightMargin = dp(12);
+        withIcon.addView(iconView(share.entry, share.entry.title, 32), iconParams);
+        withIcon.addView(item, new LinearLayout.LayoutParams(0, -2, 1f));
+        withIcon.setContentDescription(description);
+        return withIcon;
     }
 
     private void renderRates() {

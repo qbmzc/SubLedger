@@ -86,11 +86,24 @@ final class Subscription {
      * Null until tracking starts; see {@link Ledger#recordDue}.
      */
     final LocalDate recordedThrough;
+    /**
+     * Icon overrides, each null when automatic (see {@link Icons#badge}): badge text, badge colour
+     * as RGB, and the id of a square picture stored as {@code <id>.jpg} next to the attachments.
+     */
+    final String iconText;
+    final Integer iconColor;
+    final String iconImage;
 
     private Subscription(Builder b) {
         UUID.fromString(b.id);
         if (b.walletId != null) {
             UUID.fromString(b.walletId);
+        }
+        if (b.iconImage != null && !(b.iconImage.toLowerCase(Locale.ROOT) + ".jpg").matches(Attachment.FILE_PATTERN)) {
+            throw new IllegalArgumentException("图标图片无效");
+        }
+        if (b.iconColor != null && (b.iconColor < 0 || b.iconColor > 0xFFFFFF)) {
+            throw new IllegalArgumentException("图标颜色无效");
         }
         if (b.title.trim().isEmpty() || b.title.length() > 100 || b.payment.length() > 120
                 || b.note.length() > 500 || b.category.length() > 30
@@ -120,6 +133,9 @@ final class Subscription {
         walletId = b.walletId;
         prices = Collections.unmodifiableList(new ArrayList<>(b.prices));
         recordedThrough = b.recordedThrough;
+        iconText = Icons.validText(b.iconText);
+        iconColor = b.iconColor;
+        iconImage = b.iconImage == null ? null : b.iconImage.toLowerCase(Locale.ROOT);
     }
 
     /** Mutable field bag for creating and copying subscriptions. */
@@ -138,6 +154,9 @@ final class Subscription {
         String walletId;
         List<PricePoint> prices = new ArrayList<>();
         LocalDate recordedThrough;
+        String iconText;
+        Integer iconColor;
+        String iconImage;
 
         Subscription build() {
             return new Subscription(this);
@@ -164,6 +183,9 @@ final class Subscription {
         b.walletId = walletId;
         b.prices = new ArrayList<>(prices);
         b.recordedThrough = recordedThrough;
+        b.iconText = iconText;
+        b.iconColor = iconColor;
+        b.iconImage = iconImage;
         return b;
     }
 
@@ -179,6 +201,11 @@ final class Subscription {
             throw new IllegalArgumentException("金额或小数位与币种不符");
         }
         return code;
+    }
+
+    /** File name of the icon picture, or null when the subscription uses a text badge. */
+    String iconFile() {
+        return iconImage == null ? null : iconImage + ".jpg";
     }
 
     boolean hasCost() {

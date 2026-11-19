@@ -18,13 +18,14 @@ import java.util.Set;
  * Persists the {@link Ledger} as one JSON document. The same format is the user-facing backup.
  * Version history: 1 subscriptions only; 2 added the actual cost; 3 added categories, trials,
  * split bills, wallets, price history and payments; 4 added top-up records and attachment
- * metadata (the files travel in the ZIP backup, see {@link BackupZip}). Older versions still decode.
+ * metadata (the files travel in the ZIP backup, see {@link BackupZip}); 5 added subscription icons.
+ * Older versions still decode.
  */
 final class LedgerStore {
     private static final String PREFS = "ledger";
     private static final String KEY = "subscriptions";
     private static final String REVISION = "revision";
-    static final int VERSION = 4;
+    static final int VERSION = 5;
     private final SharedPreferences prefs;
 
     LedgerStore(Context context) {
@@ -95,6 +96,15 @@ final class LedgerStore {
             }
             if (entry.recordedThrough != null) {
                 row.put("recordedThrough", entry.recordedThrough.toString());
+            }
+            if (entry.iconText != null) {
+                row.put("iconText", entry.iconText);
+            }
+            if (entry.iconColor != null) {
+                row.put("iconColor", Icons.formatColor(entry.iconColor));
+            }
+            if (entry.iconImage != null) {
+                row.put("iconImage", entry.iconImage);
             }
             JSONArray prices = new JSONArray();
             for (Subscription.PricePoint price : entry.prices) {
@@ -204,6 +214,16 @@ final class LedgerStore {
                     b.prices.add(new Subscription.PricePoint(LocalDate.parse(price.getString("until")),
                             new BigDecimal(price.getString("amount")), price.getString("currency")));
                 }
+            }
+            if (version >= 5) {
+                b.iconText = row.has("iconText") ? row.getString("iconText") : null;
+                if (row.has("iconColor")) {
+                    b.iconColor = Icons.parseColor(row.getString("iconColor"));
+                    if (b.iconColor == null) {
+                        throw new JSONException("图标颜色无效");
+                    }
+                }
+                b.iconImage = row.has("iconImage") ? row.getString("iconImage") : null;
             }
             Subscription entry = b.build();
             if (!ids.add(entry.id)) {

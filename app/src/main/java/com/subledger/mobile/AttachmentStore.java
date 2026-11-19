@@ -17,19 +17,19 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.time.LocalDate;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 
 /**
- * Attachment files in app-private storage ({@code files/attachments}). Picked documents are first
+ * Attachment files and subscription icon pictures in app-private storage ({@code files/attachments}). Picked documents are first
  * written to {@code cache/incoming} on a background thread and moved in on the UI thread right
  * before the ledger is saved, so {@link #prune} never deletes a file that is still being added.
  */
 final class AttachmentStore {
     private static final int MAX_EDGE = 2400;
+    static final int ICON_EDGE = 256;
     private static final LruCache<String, Bitmap> THUMBNAILS = new LruCache<String, Bitmap>(8 * 1024 * 1024) {
         @Override
         protected int sizeOf(String key, Bitmap value) {
@@ -157,6 +157,75 @@ final class AttachmentStore {
         }
     }
 
+    /**
+     * Copies a picked image into the incoming folder as a square {@value #ICON_EDGE} px JPEG,
+     * cropped around the centre. Returns the icon id. Blocking; call off the main thread.
+     */
+    static String copyIcon(Context context, Uri uri) throws IOException {
+        ContentResolver resolver = context.getContentResolver();
+        String id = UUID.randomUUID().toString();
+        File target = incomingIcon(context, id);
+        try {
+            copyImage(resolver, uri, target);
+            Bitmap full = BitmapFactory.decodeFile(target.getPath());
+            if (full == null) {
+                throw new IOException("无法读取图片");
+            }
+            int edge = Math.min(full.getWidth(), full.getHeight());
+            Bitmap square = Bitmap.createBitmap(full, (full.getWidth() - edge) / 2, (full.getHeight() - edge) / 2,
+                    edge, edge);
+            Bitmap icon = Bitmap.createScaledBitmap(square, Math.min(edge, ICON_EDGE), Math.min(edge, ICON_EDGE), true);
+            try (OutputStream out = new FileOutputStream(target)) {
+                if (!icon.compress(Bitmap.CompressFormat.JPEG, 90, out)) {
+                    throw new IOException("无法保存图片");
+                }
+            }
+            return id;
+        } catch (IOException | RuntimeException ex) {
+            target.delete();
+            throw ex instanceof IOException ? (IOException) ex : new IOException(ex);
+        }
+    }
+
+    private static File incomingIcon(Context context, String id) {
+        return new File(incoming(context), id + ".jpg");
+    }
+
+    /** Moves a picked icon into storage; call right before saving the subscription that uses it. */
+    static boolean moveIcon(Context context, String id) {
+        File target = new File(folder(context), id + ".jpg");
+        return target.isFile() || incomingIcon(context, id).renameTo(target);
+    }
+
+    /** Deletes a picked icon that was not saved. */
+    static void discardIcon(Context context, String id) {
+        incomingIcon(context, id).delete();
+    }
+
+    /**
+     * The icon picture for a subscription: a stored one, or a just-picked one still in the
+     * incoming folder. Null when there is none or it cannot be read.
+     */
+    static Bitmap icon(Context context, String id) {
+        if (id == null) {
+            return null;
+        }
+        String name = id + ".jpg";
+        Bitmap cached = THUMBNAILS.get(name);
+        if (cached != null) {
+            return cached;
+        }
+        File file = new File(folder(context), name);
+        if (!file.isFile()) {
+            file = incomingIcon(context, id);
+        }
+        Bitmap bitmap = BitmapFactory.decodeFile(file.getPath());
+        if (bitmap != null) {
+            THUMBNAILS.put(name, bitmap);
+        }
+        return bitmap;
+    }
+
     /** Moves freshly copied files from the incoming folder into attachment storage. */
     static boolean moveIn(Context context, List<Attachment> attachments) {
         boolean all = true;
@@ -173,6 +242,7 @@ final class AttachmentStore {
         for (int i = 0; files != null && i < files.length; i++) {
             File target = new File(folder(context), files[i].getName());
             target.delete();
+            THUMBNAILS.remove(files[i].getName());
             files[i].renameTo(target);
         }
     }
@@ -189,12 +259,9 @@ final class AttachmentStore {
         folder.delete();
     }
 
-    /** Deletes stored files that no attachment in {@code ledger} refers to. */
+    /** Deletes stored files that no attachment or icon in {@code ledger} refers to. */
     static void prune(Context context, Ledger ledger) {
-        Set<String> keep = new HashSet<>();
-        for (Attachment attachment : ledger.attachments) {
-            keep.add(attachment.fileName());
-        }
+        Set<String> keep = ledger.fileNames();
         File[] files = folder(context).listFiles();
         for (int i = 0; files != null && i < files.length; i++) {
             if (files[i].isFile() && !keep.contains(files[i].getName())) {

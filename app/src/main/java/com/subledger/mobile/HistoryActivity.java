@@ -173,10 +173,16 @@ public final class HistoryActivity extends LedgerActivity {
     }
 
     private View paymentRow(Payment payment) {
+        LinearLayout container = row();
+        container.setGravity(Gravity.CENTER_VERTICAL);
+        container.setBackground(ripple(colors.card, 12));
+        container.setFocusable(true);
+        container.setOnClickListener(view -> details(payment));
+        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(32), dp(32));
+        iconParams.rightMargin = dp(12);
+        container.addView(iconView(ledger.subscription(payment.subscriptionId), payment.title, 32), iconParams);
         LinearLayout item = column();
-        item.setBackground(ripple(colors.card, 12));
-        item.setFocusable(true);
-        item.setOnClickListener(view -> details(payment));
+        container.addView(item, new LinearLayout.LayoutParams(0, -2, 1f));
         LinearLayout top = row();
         String day = String.format(Locale.ROOT, "%02d-%02d", payment.date.getMonthValue(), payment.date.getDayOfMonth());
         top.addView(label(day + "  " + payment.title, 15, colors.ink, true), new LinearLayout.LayoutParams(0, -2, 1f));
@@ -202,7 +208,7 @@ public final class HistoryActivity extends LedgerActivity {
             parts.add(files + " 个附件");
         }
         item.addView(label(String.join(" · ", parts), 12, colors.muted, false));
-        return item;
+        return container;
     }
 
     @Override

@@ -34,7 +34,7 @@ The same jar's real `org.json` classes can be put on the runtime classpath to ex
 - **Network use is limited to exchange rates.** `INTERNET` exists only for `RateStore.download()` (GET `open.er-api.com/v6/latest/<BASE>`). Never send subscription data off the device. The first download happens only when the user taps a button. After that, rates older than 12 hours refresh automatically when the app or the statistics screen opens. The UI must keep the "Rates By Exchange Rate API" attribution. `allowBackup="false"`.
 - **No XML layouts for app screens.** All activity UI is built in code. The only layout XML is `res/layout/widget.xml`, because `RemoteViews` requires one.
 - **Attachments stay on the device** in `files/attachments/<id>.jpg|pdf`. They are never uploaded anywhere; "upload" in the UI means picking a file into the app.
-- **Keep bookkeeping logic Android-free.** `Subscription`, `Wallet`, `Payment`, `TopUp`, `Attachment`, `Ledger`, `Rates`, `Stats` and `BackupZip` use only `java.*`, so they can be compiled and tested with a plain `javac --release 8` harness.
+- **Keep bookkeeping logic Android-free.** `Subscription`, `Wallet`, `Payment`, `TopUp`, `Attachment`, `Icons`, `Ledger`, `Rates`, `Stats` and `BackupZip` use only `java.*`, so they can be compiled and tested with a plain `javac --release 8` harness.
 - **Colours come from `LedgerActivity.Palette`**, never literals in screens. The palette is chosen by role (`hero` is the strong surface behind white text, `heroText` is secondary text on it, `green` is the accent for text and marks, `lime` is a soft accent background). Dark mode uses `Palette.DARK` plus `res/values-night/`. The widget uses `@color/widget_*` resources, which have night variants.
 
 ## Architecture
@@ -53,9 +53,11 @@ All source files are in `app/src/main/java/com/subledger/mobile/`.
     - `cost`/`costCurrency`: an explicit real cost per period.
     - `prices`: old prices, appended by the editor when the amount or currency changes.
     - `recordedThrough`: see `Ledger.recordDue`.
+    - `iconText`, `iconColor` (RGB), `iconImage` (id of `<id>.jpg` in the attachments folder): icon overrides, each null when automatic. `iconFile()` gives the picture's file name.
 - **`Wallet`**: a prepaid balance, which may go negative. It can hold an optional `unitCost` in `costCurrency`. `topUp` updates the unit cost as a weighted average of the remaining balance and the new top-up.
 - **`Payment`**: one recorded charge. It stores the bill (`amount`/`currency`) and the real `cost`/`costCurrency`, which is **fixed at record time** (converted to the base currency then, if a rate exists), so later rate changes never rewrite history. `Payment.idFor(subscriptionId, renewalDate)` is a name-based UUID, so re-recording or merging backups cannot duplicate a renewal.
 - **`TopUp`**: one wallet top-up (amount in the wallet currency, plus an optional amount actually paid).
+- **`Icons`**: text badges. The user's text/colour win, else a `PRESETS` entry matched by keyword in the lower-case title (abbreviation + brand colour only; never bundle or download logos), else the title's first code point on an `AUTO` colour chosen by a stable hash. `Badge.textColor()` picks black or white by WCAG contrast; every `AUTO` colour must keep white text at ≥ 4.5:1.
 - **`Attachment`**: metadata for one JPEG or PDF file, owned by a subscription, a top-up or a payment (`ownerId`). `FILE_PATTERN` is the only file name accepted from backups.
 - **`Ledger`**: a snapshot of subscriptions, wallets, payments, top-ups and attachments. The constructor drops top-ups of missing wallets and attachments of missing owners, so deleting any record also deletes its attachments. Inside `Ledger`, `with(...)` copies the snapshot while keeping the top-ups and attachments. Every bookkeeping rule is a method that returns a new `Ledger`:
   - `recordDue(rates, today)`: records each AUTO renewal in `(recordedThrough, today]`, deducts the paying wallet, ends trials, and sets `recordedThrough = today`. A subscription with no `recordedThrough` (migrated data) starts tracking without backfilling. `upsert` makes new subscriptions, and MANUAL→AUTO switches, start from yesterday.
@@ -64,20 +66,22 @@ All source files are in `app/src/main/java/com/subledger/mobile/`.
   - `realCost(entry)`: the explicit cost, else the paying wallet's unit cost, else the bill. `payingWallet` only returns a wallet whose currency matches the bill.
   - `coverage(wallet, today)`: simulates future charges against the balance, which drives the "余额不足" (insufficient balance) warnings.
   - `topUp(record)`: updates the balance and the weighted unit cost. `removeTopUp`: subtracts the amount and leaves the unit cost unchanged. A new wallet's starting balance is recorded as its first top-up.
-  - `addAttachments` (at most 20 per owner), `removeAttachment`, `keepAttachments(predicate)` (used on import to drop records whose file is missing).
+  - `addAttachments` (at most 20 per owner), `removeAttachment`, `keepFiles(predicate)` (used on import to drop attachments and clear icon pictures whose file is missing).
+  - `fileNames()`: every stored file the ledger refers to (attachments and icon pictures). Pruning and the ZIP export use it.
 - **`Rates`**: the base currency plus `fetched` and `manual` rates, both expressed as base units per 1 foreign unit. Manual rates win. `withBase` re-expresses the existing rates in the new base where it can.
 - **`Stats`**: built from `(Ledger, Rates, today)`. The estimates (monthly, yearly, the 12-month projection, and the item/category/payment/cycle shares) use `realCost` and `myShare` over non-ended subscriptions. Projections skip charges already recorded today. Spent totals (this year, last 12 months) come from `Payment.mine`. Costs without a rate end up in `missing` and `unconvertedPayments`.
 
 ### Persistence
 
-- **`LedgerStore`**: the whole `Ledger` is stored as one JSON string in SharedPreferences `ledger`/`subscriptions`, written with `commit()`. A `revision` counter changes on every save, so screens can tell when to re-render. `encode`/`decode` are also the user-facing backup format, currently **version 3** (`LedgerStore.VERSION`):
+- **`LedgerStore`**: the whole `Ledger` is stored as one JSON string in SharedPreferences `ledger`/`subscriptions`, written with `commit()`. A `revision` counter changes on every save, so screens can tell when to re-render. `encode`/`decode` are also the user-facing backup format, currently **version 5** (`LedgerStore.VERSION`):
   - version 1: subscriptions only;
   - version 2: added the optional cost;
   - version 3: added the category, trial, split, wallet link, prices, `recordedThrough`, and the `wallets` and `payments` arrays;
-  - version 4: added the `topUps` and `attachments` arrays.
-  Older versions still decode. Ids must be unique across all three arrays. **Changing the JSON shape changes the backup format.** Bump `VERSION` and keep decoding the older versions.
+  - version 4: added the `topUps` and `attachments` arrays;
+  - version 5: added the subscription icon fields (`iconText`, `iconColor` as `#RRGGBB`, `iconImage`).
+  Older versions still decode. Ids must be unique across all arrays. **Changing the JSON shape changes the backup format.** Bump `VERSION` and keep decoding the older versions.
 - **`BackupZip`**: the backup file is a ZIP containing `ledger.json` plus `attachments/<file>`. `read` extracts into a staging directory, accepts only `ledger.json` and names matching `Attachment.FILE_PATTERN` (this prevents zip slip), and enforces per-entry and total size caps. Import auto-detects ZIP vs plain JSON by the `PK\3\4` header, so old `.json` backups still import.
-- **`AttachmentStore`** (Android): copies picked files into `cache/incoming` on a background thread. Images are re-encoded to JPEG with the longest edge at most 2400 px, EXIF rotation applied; PDFs are checked for the `%PDF` header. The files move into `files/attachments` on the UI thread right before `commit`. `commit` calls `prune`, which deletes unreferenced files, so a file must never sit in the attachments folder without a record about to be saved. `AttachmentStore` also provides thumbnails through an `LruCache`.
+- **`AttachmentStore`** (Android): copies picked files into `cache/incoming` on a background thread. Images are re-encoded to JPEG with the longest edge at most 2400 px, EXIF rotation applied; PDFs are checked for the `%PDF` header. The files move into `files/attachments` on the UI thread right before `commit`. `commit` calls `prune`, which deletes unreferenced files, so a file must never sit in the attachments folder without a record about to be saved. `AttachmentStore` also provides thumbnails through an `LruCache`. Icon pictures (`copyIcon`: centre-cropped 256 px JPEG) follow the same rule: picked into `cache/incoming`, moved in by `moveIcon` just before the editor saves, discarded when the editor is cancelled.
 - **`RateStore`**: SharedPreferences `rates`/`state`. All mutations go through `update(UnaryOperator)`, which is synchronized against background downloads. A download result is discarded if the base currency changed while it ran. Rates are **not** part of the backup.
 
 ### Android layer
@@ -87,10 +91,11 @@ All source files are in `app/src/main/java/com/subledger/mobile/`.
   - The view helpers: `column`, `row`, `panel`, `label`, `pill`, `action`, `input`, `suggestInput`, `check`, `options`, `addField`, `dp`, `money`, `percent`, `parseAmount`, `chooseDate`.
   - `screen(title, headerAction)`, the standard sub-page with a back button that keeps its scroll position.
   - `commit(Supplier<Ledger>)`, the write path. It also prunes attachment files.
+  - `iconView(entry, title, size)`: the round subscription icon (`IconDrawable`: picture or text badge, with a `line`-coloured ring). Shown on list cards, the details dialog, statistics item rows and payment rows (a deleted subscription falls back to a badge from the payment title).
   - `AttachmentStrip`, a thumbnail row with an add button for one owner. Strips rebuild themselves in `onResume`. Picking files goes through `pickAttachments`, with `PICK_ATTACHMENTS` handled in the base `onActivityResult`, so subclasses must call `super`. When the files are saved, the base class calls `onLedgerChanged()`, which subclasses override to re-render.
   - The background rate refresh.
-- **`MainActivity`**: the list, summary card, wallet strip, subscription editor and details dialogs (the details dialog includes the attachment strip), settings menu, and backup import/export (SAF, background `Thread`, ZIP export, ZIP or JSON import through a staging directory in the cache).
-- **`AttachmentActivity`**: viewer for one attachment. Images are scaled to the screen width; PDFs show their first 5 pages through `PdfRenderer`. Deleting is done here. `onResume` re-renders when the date or the store revision has changed, or when charges were just recorded. Otherwise it only refreshes the summary card.
+- **`MainActivity`**: the list, summary card, wallet strip, subscription editor (with the icon dialog: picture, text, colour swatches, hex colour) and details dialogs (the details dialog includes the attachment strip), settings menu, and backup import/export (SAF, background `Thread`, ZIP export, ZIP or JSON import through a staging directory in the cache). `onResume` re-renders when the date or the store revision has changed, or when charges were just recorded; otherwise it only refreshes the summary card.
+- **`AttachmentActivity`**: viewer for one attachment. Images are scaled to the screen width; PDFs show their first 5 pages through `PdfRenderer`. Deleting is done here.
 - **`StatsActivity`**: totals, the custom-drawn `MonthBars` view (tap a bar to see that month's charges), the share rows, and rate management.
 - **`WalletsActivity`**: wallet list with coverage and top-up records, plus create, edit, top-up and delete. Each top-up has a details dialog with its invoices.
 - **`HistoryActivity`**: payments grouped by month, optionally filtered by the `SUBSCRIPTION` or `WALLET` extra. Tapping a payment opens its details with receipts. It supports manual backfill and deletion with an optional wallet refund.
