@@ -74,6 +74,9 @@ abstract class LedgerActivity extends Activity {
     Palette colors = Palette.LIGHT;
 
     static final int PICK_ATTACHMENTS = 40;
+    static final int EXPORT_MONTH = 41;
+    /** Month being exported while the save dialog is open; survives activity recreation. */
+    private String pendingExport;
     /** Owner whose attachments are being picked; survives activity recreation. */
     private String pendingOwner;
     private AttachmentStrip pendingStrip;
@@ -85,6 +88,7 @@ abstract class LedgerActivity extends Activity {
         super.onCreate(state);
         if (state != null) {
             pendingOwner = state.getString("pendingOwner");
+            pendingExport = state.getString("pendingExport");
         }
     }
 
@@ -92,14 +96,20 @@ abstract class LedgerActivity extends Activity {
     protected void onSaveInstanceState(Bundle state) {
         super.onSaveInstanceState(state);
         state.putString("pendingOwner", pendingOwner);
+        state.putString("pendingExport", pendingExport);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        // Attachments may have been deleted in the viewer; refresh strips still on screen.
+        // Attachments may have been deleted or moved in the viewer.
+        refreshStrips();
+    }
+
+    /** Rebuilds every attachment strip still on screen, e.g. after a file moved between records. */
+    void refreshStrips() {
         strips.removeIf(strip -> !strip.isAttachedToWindow());
-        for (AttachmentStrip strip : strips) {
+        for (AttachmentStrip strip : new ArrayList<>(strips)) {
             strip.rebuild();
         }
     }
@@ -264,10 +274,137 @@ abstract class LedgerActivity extends Activity {
             }
             tile.setContentDescription(attachment.name);
             tile.setFocusable(true);
-            tile.setOnClickListener(view -> startActivity(new Intent(LedgerActivity.this, AttachmentActivity.class)
-                    .putExtra(AttachmentActivity.ID, attachment.id)));
+            tile.setOnClickListener(view -> openAttachment(attachment));
+            tile.setOnLongClickListener(view -> {
+                attachmentMenu(attachment);
+                return true;
+            });
             return tile;
         }
+    }
+
+    void openAttachment(Attachment attachment) {
+        startActivity(new Intent(this, AttachmentActivity.class).putExtra(AttachmentActivity.ID, attachment.id));
+    }
+
+    /** Long-press menu of an attachment tile. */
+    private void attachmentMenu(Attachment attachment) {
+        boolean movable = !moveTargets(ledgerStore().load(), attachment).isEmpty();
+        List<String> items = new ArrayList<>();
+        List<Runnable> handlers = new ArrayList<>();
+        items.add("查看");
+        handlers.add(() -> openAttachment(attachment));
+        if (movable) {
+            items.add("移到其他账期…");
+            handlers.add(() -> moveAttachment(attachment, this::attachmentsChanged));
+        }
+        items.add("删除");
+        handlers.add(() -> deleteAttachment(attachment, this::attachmentsChanged));
+        new android.app.AlertDialog.Builder(this).setTitle(attachment.name)
+                .setItems(items.toArray(new String[0]), (dialog, which) -> handlers.get(which).run())
+                .setNegativeButton("取消", null).show();
+    }
+
+    private void attachmentsChanged() {
+        refreshStrips();
+        onLedgerChanged();
+    }
+
+    /**
+     * Records a subscription's or payment's file can move to: the subscription itself ("订阅资料")
+     * and each of its billing periods. Empty for top-up files.
+     */
+    List<String[]> moveTargets(Ledger ledger, Attachment attachment) {
+        List<String[]> targets = new ArrayList<>();
+        Payment ownerPayment = ledger.payment(attachment.ownerId);
+        String subscriptionId = ownerPayment != null ? ownerPayment.subscriptionId
+                : ledger.subscription(attachment.ownerId) != null ? attachment.ownerId : null;
+        if (subscriptionId == null) {
+            return targets;
+        }
+        if (ledger.subscription(subscriptionId) != null && !subscriptionId.equals(attachment.ownerId)) {
+            targets.add(new String[]{"订阅资料（不属于某一期）", subscriptionId});
+        }
+        for (Payment payment : ledger.paymentsOf(subscriptionId)) {
+            if (!payment.id.equals(attachment.ownerId)) {
+                targets.add(new String[]{payment.date + " 这一期 · " + money(payment.currency, payment.amount), payment.id});
+            }
+        }
+        return targets;
+    }
+
+    void moveAttachment(Attachment attachment, Runnable after) {
+        List<String[]> targets = moveTargets(ledgerStore().load(), attachment);
+        String[] labels = new String[targets.size()];
+        for (int i = 0; i < labels.length; i++) {
+            labels[i] = targets.get(i)[0];
+        }
+        new android.app.AlertDialog.Builder(this).setTitle("移到")
+                .setItems(labels, (dialog, which) -> {
+                    String owner = targets.get(which)[1];
+                    if (commit(() -> ledgerStore().load().moveAttachment(attachment.id, owner))) {
+                        toast("已移到 " + labels[which]);
+                        after.run();
+                    }
+                })
+                .setNegativeButton("取消", null).show();
+    }
+
+    void deleteAttachment(Attachment attachment, Runnable after) {
+        new android.app.AlertDialog.Builder(this).setTitle("删除附件")
+                .setMessage("确定删除“" + attachment.name + "”？")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("删除", (dialog, button) -> {
+                    if (commit(() -> ledgerStore().load().removeAttachment(attachment.id))) {
+                        after.run();
+                    }
+                }).show();
+    }
+
+    /** Lets the user pick a month with records, then exports its statement. */
+    void chooseMonthToExport() {
+        Ledger ledger = ledgerStore().load();
+        List<java.time.YearMonth> months = MonthlyReport.months(ledger);
+        if (months.isEmpty()) {
+            toast("还没有扣款或充值记录");
+            return;
+        }
+        Rates rates = rateStore().load();
+        String[] labels = new String[months.size()];
+        for (int i = 0; i < labels.length; i++) {
+            MonthlyReport report = new MonthlyReport(ledger, rates, months.get(i));
+            labels[i] = months.get(i).getYear() + " 年 " + months.get(i).getMonthValue() + " 月 · "
+                    + report.records() + " 笔记录 · " + report.files.size() + " 个附件";
+        }
+        new android.app.AlertDialog.Builder(this).setTitle("按月导出账单与发票")
+                .setItems(labels, (dialog, which) -> exportMonth(months.get(which)))
+                .setNegativeButton("取消", null).show();
+    }
+
+    /** Asks where to save the month's statement ZIP; see {@link MonthlyReport}. */
+    void exportMonth(java.time.YearMonth month) {
+        pendingExport = month.toString();
+        startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE).setType("application/zip")
+                .putExtra(Intent.EXTRA_TITLE, "账单-" + month + ".zip"), EXPORT_MONTH);
+    }
+
+    private void finishExport(Uri uri) {
+        java.time.YearMonth month = java.time.YearMonth.parse(pendingExport);
+        MonthlyReport report = new MonthlyReport(ledgerStore().load(), rateStore().load(), month);
+        java.io.File folder = AttachmentStore.folder(this);
+        new Thread(() -> {
+            try (java.io.OutputStream stream = getContentResolver().openOutputStream(uri, "wt")) {
+                if (stream == null) {
+                    throw new IOException("无法打开文件");
+                }
+                int files = report.write(stream, folder);
+                runOnUiThread(() -> toast("已导出 " + month.getYear() + " 年 " + month.getMonthValue() + " 月："
+                        + report.records() + " 笔记录、" + files + " 个附件"));
+            } catch (IOException | RuntimeException ex) {
+                runOnUiThread(() -> toast("导出失败，请检查文件位置和可用空间"));
+            }
+        }, "month-export").start();
     }
 
     /** Opens the system picker for images and PDFs to attach to {@code ownerId}. */
@@ -284,6 +421,13 @@ abstract class LedgerActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == EXPORT_MONTH) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null && pendingExport != null) {
+                finishExport(data.getData());
+            }
+            pendingExport = null;
+            return;
+        }
         if (requestCode != PICK_ATTACHMENTS) {
             return;
         }

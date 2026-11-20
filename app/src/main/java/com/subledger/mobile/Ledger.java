@@ -3,6 +3,7 @@ package com.subledger.mobile;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -184,6 +185,80 @@ final class Ledger {
             }
         }
         return names;
+    }
+
+    /** Attaches a file to another subscription, payment or top-up. */
+    Ledger moveAttachment(String id, String owner) {
+        Attachment attachment = attachment(id);
+        if (attachment == null || attachment.ownerId.equals(owner)) {
+            return this;
+        }
+        if (attachmentsOf(owner).size() >= MAX_ATTACHMENTS_PER_OWNER) {
+            throw new IllegalArgumentException("每条记录最多 " + MAX_ATTACHMENTS_PER_OWNER + " 个附件");
+        }
+        List<Attachment> list = new ArrayList<>();
+        for (Attachment existing : attachments) {
+            list.add(existing.id.equals(id) ? existing.withOwner(owner) : existing);
+        }
+        return new Ledger(subscriptions, wallets, payments, topUps, list);
+    }
+
+    /**
+     * Moves files attached to a subscription onto the payment of the month they were added in:
+     * the latest payment on or before that day, else the first one later that month. Files from
+     * months without a payment stay with the subscription. Used once for data from before
+     * attachments were kept per billing period.
+     */
+    Ledger regroupAttachments() {
+        Map<String, List<Payment>> bySubscription = new HashMap<>();
+        for (Payment payment : payments) {
+            bySubscription.computeIfAbsent(payment.subscriptionId, key -> new ArrayList<>()).add(payment);
+        }
+        Map<String, Integer> counts = attachmentCounts();
+        List<Attachment> list = new ArrayList<>();
+        for (Attachment attachment : attachments) {
+            Payment best = null;
+            YearMonth month = YearMonth.from(attachment.added);
+            for (Payment payment : bySubscription.getOrDefault(attachment.ownerId, Collections.emptyList())) {
+                if (!YearMonth.from(payment.date).equals(month)) {
+                    continue;
+                }
+                boolean onOrBefore = !payment.date.isAfter(attachment.added);
+                boolean bestOnOrBefore = best != null && !best.date.isAfter(attachment.added);
+                if (best == null
+                        || onOrBefore && (!bestOnOrBefore || payment.date.isAfter(best.date))
+                        || !onOrBefore && !bestOnOrBefore && payment.date.isBefore(best.date)) {
+                    best = payment;
+                }
+            }
+            if (best != null && counts.getOrDefault(best.id, 0) < MAX_ATTACHMENTS_PER_OWNER) {
+                counts.merge(best.id, 1, Integer::sum);
+                list.add(attachment.withOwner(best.id));
+            } else {
+                list.add(attachment);
+            }
+        }
+        return new Ledger(subscriptions, wallets, payments, topUps, list);
+    }
+
+    /** Payments of one subscription, newest first. */
+    List<Payment> paymentsOf(String subscriptionId) {
+        List<Payment> result = new ArrayList<>();
+        for (int i = payments.size() - 1; i >= 0; i--) {
+            if (payments.get(i).subscriptionId.equals(subscriptionId)) {
+                result.add(payments.get(i));
+            }
+        }
+        return result;
+    }
+
+    Payment payment(String id) {
+        for (Payment payment : payments) {
+            if (payment.id.equals(id)) {
+                return payment;
+            }
+        }
+        return null;
     }
 
     Ledger removeAttachment(String id) {

@@ -1,6 +1,5 @@
 package com.subledger.mobile;
 
-import android.app.AlertDialog;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.pdf.PdfRenderer;
@@ -24,16 +23,28 @@ public final class AttachmentActivity extends LedgerActivity {
     }
 
     private void render() {
-        Attachment attachment = ledgerStore().load().attachment(getIntent().getStringExtra(ID));
+        Ledger ledger = ledgerStore().load();
+        Attachment attachment = ledger.attachment(getIntent().getStringExtra(ID));
         if (attachment == null) {
             finish();
             return;
         }
-        LinearLayout root = screen("附件", action("删除", colors.line, colors.amber, () -> confirmDelete(attachment)));
+        LinearLayout root = screen("附件", null);
         root.addView(label(attachment.name, 16, colors.ink, true));
         gap(root, 2);
         root.addView(label(attachment.added + " 添加 · " + size(attachment.size)
-                + (attachment.isPdf() ? " · PDF" : ""), 12, colors.muted, false));
+                + (attachment.isPdf() ? " · PDF" : "") + " · " + ownerName(ledger, attachment), 12, colors.muted, false));
+        gap(root, 10);
+        LinearLayout actions = row();
+        if (!moveTargets(ledger, attachment).isEmpty()) {
+            actions.addView(action("移到其他账期…", colors.line, colors.green,
+                    () -> moveAttachment(attachment, this::render)), new LinearLayout.LayoutParams(0, dp(46), 1f));
+        }
+        LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        deleteParams.leftMargin = actions.getChildCount() > 0 ? dp(8) : 0;
+        actions.addView(action("删除", colors.line, colors.amber,
+                () -> deleteAttachment(attachment, this::finish)), deleteParams);
+        root.addView(actions);
         gap(root, 12);
         File file = AttachmentStore.file(this, attachment);
         int width = getResources().getDisplayMetrics().widthPixels - dp(40);
@@ -88,15 +99,17 @@ public final class AttachmentActivity extends LedgerActivity {
         return image;
     }
 
-    private void confirmDelete(Attachment attachment) {
-        new AlertDialog.Builder(this).setTitle("删除附件")
-                .setMessage("确定删除“" + attachment.name + "”？")
-                .setNegativeButton("取消", null)
-                .setPositiveButton("删除", (dialog, button) -> {
-                    if (commit(() -> ledgerStore().load().removeAttachment(attachment.id))) {
-                        finish();
-                    }
-                }).show();
+    /** Which record the file belongs to, e.g. "2026-11-12 这一期". */
+    private static String ownerName(Ledger ledger, Attachment attachment) {
+        Payment payment = ledger.payment(attachment.ownerId);
+        if (payment != null) {
+            return "属于 " + payment.title + " " + payment.date + " 这一期";
+        }
+        Subscription entry = ledger.subscription(attachment.ownerId);
+        if (entry != null) {
+            return "属于 " + entry.title + " 的订阅资料";
+        }
+        return "属于充值记录";
     }
 
     private static String size(long bytes) {

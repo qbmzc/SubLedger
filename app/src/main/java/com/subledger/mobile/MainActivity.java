@@ -109,7 +109,18 @@ public final class MainActivity extends LedgerActivity {
         ledgerStore().recordDue(rateStore().load(), today);
         ledger = ledgerStore().load();
         revision = ledgerStore().revision();
-        attachmentCounts = ledger.attachmentCounts();
+        // Per subscription: its own files plus the invoices of all its billing periods.
+        Map<String, Integer> perOwner = ledger.attachmentCounts();
+        attachmentCounts = new HashMap<>();
+        for (Subscription entry : ledger.subscriptions) {
+            int files = perOwner.getOrDefault(entry.id, 0);
+            for (Payment payment : ledger.paymentsOf(entry.id)) {
+                files += perOwner.getOrDefault(payment.id, 0);
+            }
+            if (files > 0) {
+                attachmentCounts.put(entry.id, files);
+            }
+        }
         coverage = new HashMap<>();
         for (Wallet wallet : ledger.wallets) {
             coverage.put(wallet.id, ledger.coverage(wallet, today));
@@ -444,19 +455,6 @@ public final class MainActivity extends LedgerActivity {
             }
             text.append("\n现在 ").append(money(entry.currency, entry.amount));
         }
-        List<Payment> recent = new ArrayList<>();
-        for (Payment payment : ledger.payments) {
-            if (payment.subscriptionId.equals(entry.id)) {
-                recent.add(payment);
-            }
-        }
-        if (!recent.isEmpty()) {
-            text.append("\n\n最近扣款");
-            for (int i = recent.size() - 1; i >= Math.max(0, recent.size() - 3); i--) {
-                Payment payment = recent.get(i);
-                text.append("\n").append(payment.date).append("  ").append(money(payment.costCurrency, payment.cost));
-            }
-        }
         if (!entry.note.isEmpty()) {
             text.append("\n\n").append(entry.note);
         }
@@ -464,7 +462,16 @@ public final class MainActivity extends LedgerActivity {
         body.setPadding(dp(24), dp(8), dp(24), dp(4));
         body.addView(label(text.toString(), 15, colors.ink, false));
         gap(body, 14);
-        body.addView(label("截图与附件", 13, colors.muted, true));
+        gap(body, 4);
+        body.addView(label("每期账单与发票", 16, colors.ink, true));
+        body.addView(label("点 ＋ 上传这一期的发票；点按缩略图查看，长按可删除或移到其他账期。", 12, colors.muted, false));
+        gap(body, 8);
+        LinearLayout periods = column();
+        body.addView(periods);
+        renderPeriods(periods, entry.id);
+        gap(body, 14);
+        body.addView(label("订阅资料", 16, colors.ink, true));
+        body.addView(label("不属于某一期的截图，例如套餐页面。", 12, colors.muted, false));
         gap(body, 6);
         body.addView(new AttachmentStrip(entry.id), new LinearLayout.LayoutParams(-1, -2));
         ScrollView scroll = new ScrollView(this);
@@ -481,6 +488,69 @@ public final class MainActivity extends LedgerActivity {
                     new Intent(this, HistoryActivity.class).putExtra(HistoryActivity.SUBSCRIPTION, entry.id)));
         }
         dialog.show();
+    }
+
+    private static final int PERIODS_SHOWN = 6;
+
+    /**
+     * The latest billing periods of a subscription, each with its own invoices, newest first.
+     * When the running period has no payment yet, offers to record it so its invoice has a home.
+     */
+    private void renderPeriods(LinearLayout periods, String subscriptionId) {
+        periods.removeAllViews();
+        Ledger current = ledgerStore().load();
+        Subscription entry = current.subscription(subscriptionId);
+        if (entry == null) {
+            return;
+        }
+        LocalDate now = LocalDate.now();
+        List<Payment> history = current.paymentsOf(entry.id);
+        LocalDate due = entry.lastDue(now);
+        boolean missing = due != null && (history.isEmpty() || history.get(0).date.isBefore(due));
+        if (missing) {
+            LinearLayout box = panel(colors.lime, 14);
+            box.addView(label(due + " 这一期还没有扣款记录", 14, colors.ink, true));
+            gap(box, 2);
+            box.addView(label("补记后即可上传这一期的发票。补记不会改动余额账户。", 12, colors.muted, false));
+            gap(box, 8);
+            box.addView(action("补记 " + money(entry.currency, entry.amount), colors.card, colors.green,
+                    () -> backfillPeriod(entry.id, due, periods)), new LinearLayout.LayoutParams(-1, dp(44)));
+            periods.addView(box);
+            gap(periods, 10);
+        }
+        for (int i = 0; i < Math.min(PERIODS_SHOWN, history.size()); i++) {
+            Payment payment = history.get(i);
+            periods.addView(label(payment.date + " · " + money(payment.currency, payment.amount)
+                    + (payment.auto ? "" : " · 手动记录"), 14, colors.ink, true));
+            gap(periods, 4);
+            periods.addView(new AttachmentStrip(payment.id), new LinearLayout.LayoutParams(-1, -2));
+            gap(periods, 10);
+        }
+        if (history.size() > PERIODS_SHOWN) {
+            periods.addView(action("查看全部 " + history.size() + " 期", colors.line, colors.green,
+                    () -> startActivity(new Intent(this, HistoryActivity.class)
+                            .putExtra(HistoryActivity.SUBSCRIPTION, entry.id))),
+                    new LinearLayout.LayoutParams(-1, dp(44)));
+        } else if (history.isEmpty() && !missing) {
+            periods.addView(label("还没有扣款记录。续费后会出现在这里，届时可上传那一期的发票。",
+                    13, colors.muted, false));
+        }
+    }
+
+    private void backfillPeriod(String subscriptionId, LocalDate due, LinearLayout periods) {
+        if (commit(() -> {
+            Ledger current = ledgerStore().load();
+            Subscription entry = current.subscription(subscriptionId);
+            if (entry == null) {
+                throw new IllegalStateException("订阅已删除");
+            }
+            Ledger.Money cost = current.costForManualPayment(entry, rateStore().load());
+            return current.addPayment(new Payment(Payment.idFor(entry.id, due), entry.id, entry.title, due,
+                    entry.amount, entry.currency, cost.amount, cost.currency, entry.splitWays, null, false));
+        })) {
+            renderPeriods(periods, subscriptionId);
+            render();
+        }
     }
 
     private void confirmManualRenewal(Subscription entry) {
@@ -987,13 +1057,14 @@ public final class MainActivity extends LedgerActivity {
     private void settings() {
         String notificationAction = RenewalReminder.enabled(this) ? "管理系统通知" : "开启续费提醒";
         String[] actions = {notificationAction, "余额账户", "扣款记录", "支出统计与汇率",
-                "导出备份（含附件）", "从备份合并", "使用 Claude 模板"};
+                "按月导出账单与发票", "导出备份（含附件）", "从备份合并", "使用 Claude 模板"};
         Runnable[] handlers = {
                 () -> startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
                         .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName())),
                 () -> open(WalletsActivity.class),
                 () -> open(HistoryActivity.class),
                 () -> open(StatsActivity.class),
+                this::chooseMonthToExport,
                 () -> startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT)
                         .addCategory(Intent.CATEGORY_OPENABLE).setType("application/zip")
                         .putExtra(Intent.EXTRA_TITLE, "subscriptions-" + LocalDate.now() + ".zip"), SAVE_BACKUP),

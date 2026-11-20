@@ -33,6 +33,11 @@ final class Attachment {
         this.size = size;
     }
 
+    /** The same file attached to another record. */
+    Attachment withOwner(String owner) {
+        return new Attachment(id, owner, mime, name, added, size);
+    }
+
     boolean isPdf() {
         return PDF.equals(mime);
     }

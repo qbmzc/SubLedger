@@ -123,7 +123,7 @@ public final class HistoryActivity extends LedgerActivity {
             YearMonth current = YearMonth.from(payment.date);
             if (!current.equals(month)) {
                 month = current;
-                section(root, current.getYear() + " 年 " + current.getMonthValue() + " 月 · "
+                monthHeader(root, current, current.getYear() + " 年 " + current.getMonthValue() + " 月 · "
                         + money(rates.base, monthTotal(visible, current)));
                 group = panel(colors.card, 18);
                 root.addView(group);
@@ -139,6 +139,19 @@ public final class HistoryActivity extends LedgerActivity {
                 render();
             }), new LinearLayout.LayoutParams(-1, dp(46)));
         }
+    }
+
+    /** Month title with an export button for that month's statement and invoices. */
+    private void monthHeader(LinearLayout root, YearMonth month, String title) {
+        gap(root, 18);
+        LinearLayout header = row();
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.addView(label(title, 18, colors.ink, true), new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView export = action("导出", colors.line, colors.green, () -> exportMonth(month));
+        export.setContentDescription("导出 " + month.getYear() + " 年 " + month.getMonthValue() + " 月账单与发票");
+        header.addView(export, new LinearLayout.LayoutParams(dp(64), dp(40)));
+        root.addView(header);
+        gap(root, 8);
     }
 
     private String filterName() {

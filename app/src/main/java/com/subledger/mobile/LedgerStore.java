@@ -18,14 +18,16 @@ import java.util.Set;
  * Persists the {@link Ledger} as one JSON document. The same format is the user-facing backup.
  * Version history: 1 subscriptions only; 2 added the actual cost; 3 added categories, trials,
  * split bills, wallets, price history and payments; 4 added top-up records and attachment
- * metadata (the files travel in the ZIP backup, see {@link BackupZip}); 5 added subscription icons.
+ * metadata (the files travel in the ZIP backup, see {@link BackupZip}); 5 added subscription icons;
+ * 6 keeps invoices per billing period (files of older versions that were attached to a subscription
+ * move to the payment of the month they were added in, see {@link Ledger#regroupAttachments}).
  * Older versions still decode.
  */
 final class LedgerStore {
     private static final String PREFS = "ledger";
     private static final String KEY = "subscriptions";
     private static final String REVISION = "revision";
-    static final int VERSION = 5;
+    static final int VERSION = 6;
     private final SharedPreferences prefs;
 
     LedgerStore(Context context) {
@@ -297,6 +299,7 @@ final class LedgerStore {
             }
             attachments.add(attachment);
         }
-        return new Ledger(subscriptions, wallets, payments, topUps, attachments);
+        Ledger ledger = new Ledger(subscriptions, wallets, payments, topUps, attachments);
+        return version < 6 ? ledger.regroupAttachments() : ledger;
     }
 }

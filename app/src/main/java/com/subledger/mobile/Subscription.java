@@ -233,6 +233,27 @@ final class Subscription {
         return mode == Mode.AUTO ? occurrence(indexOnOrAfter(today)) : anchor;
     }
 
+    /**
+     * The latest renewal on or before {@code today}, i.e. the billing period that is running now,
+     * or null when there has been none yet (including trials and ended subscriptions).
+     */
+    LocalDate lastDue(LocalDate today) {
+        if (trial) {
+            return null;
+        }
+        if (mode == Mode.AUTO) {
+            long index = indexOnOrAfter(today);
+            LocalDate date = occurrence(index);
+            return !date.isAfter(today) ? date : index == 0 ? null : occurrence(index - 1);
+        }
+        if (mode == Mode.MANUAL) {
+            // The anchor is the next renewal, so the running period started one cycle earlier.
+            LocalDate previous = cycle == Cycle.WEEKLY ? anchor.minusWeeks(1) : anchor.minusMonths(cycle.months());
+            return previous.isAfter(today) ? null : previous;
+        }
+        return null;
+    }
+
     /** Monthly estimate of the bill, in {@link #currency}. */
     BigDecimal monthlyEstimate() {
         return perMonth(amount);
