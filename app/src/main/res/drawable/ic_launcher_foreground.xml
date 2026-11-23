@@ -1,0 +1,12 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- The 48-unit receipt mark, scaled into the adaptive icon's safe zone. -->
+    <group android:scaleX="1.8" android:scaleY="1.8"
+        android:translateX="10.8" android:translateY="11.7">
+        <path android:fillColor="#E7EFBB"
+            android:pathData="M14,10H34V37L29,34L24,37L19,34L14,37Z" />
+        <path android:fillColor="#254436"
+            android:pathData="M18,17H30V19H18ZM18,22H30V24H18ZM18,27H25V29H18Z" />
+    </group>
+</vector>

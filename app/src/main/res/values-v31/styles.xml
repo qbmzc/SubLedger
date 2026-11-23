@@ -1,0 +1,13 @@
+<resources>
+    <!-- Material You: accent and surfaces follow the wallpaper (see LedgerActivity.Palette). -->
+    <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:colorAccent">@android:color/system_accent1_600</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowBackground">@android:color/system_neutral1_50</item>
+        <item name="android:forceDarkAllowed">false</item>
+    </style>
+</resources>

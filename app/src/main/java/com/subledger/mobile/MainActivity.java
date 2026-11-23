@@ -1,11 +1,8 @@
 package com.subledger.mobile;
 
 import android.Manifest;
-import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.graphics.Color;
-import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
@@ -16,11 +13,10 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.AutoCompleteTextView;
-import android.widget.CheckBox;
+import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 
@@ -32,6 +28,7 @@ import java.io.OutputStream;
 import java.io.PushbackInputStream;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -43,6 +40,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.Supplier;
 
 public final class MainActivity extends LedgerActivity {
     private static final int SAVE_BACKUP = 10;
@@ -52,9 +50,14 @@ public final class MainActivity extends LedgerActivity {
     private static final int MAX_BACKUP_BYTES = 8 * 1024 * 1024;
     private static final String[] FILTERS = {"进行中", "近 30 天", "已停止"};
     private static final String[] CATEGORIES = {"AI", "影音", "音乐", "云存储", "工具", "游戏", "学习", "办公", "其他"};
+    private static final DateTimeFormatter TODAY = DateTimeFormatter.ofPattern("M月d日 EEEE", Locale.CHINA);
+    /** Width of the overview column on expanded windows, dp. */
+    private static final int SIDE_DP = 380;
     private int filter;
     private String query = "";
-    private LinearLayout root, summary, entries, filterButtons;
+    private Page page;
+    private LinearLayout summary, entries;
+    private TextView listCount;
     private Ledger ledger;
     private Map<String, Ledger.Coverage> coverage = new HashMap<>();
     private LocalDate today;
@@ -104,6 +107,11 @@ public final class MainActivity extends LedgerActivity {
         }
     }
 
+    /** Two panes side by side on expanded (desktop-size) windows. */
+    private boolean twoPane() {
+        return expanded();
+    }
+
     private void render() {
         today = LocalDate.now();
         ledgerStore().recordDue(rateStore().load(), today);
@@ -126,56 +134,61 @@ public final class MainActivity extends LedgerActivity {
             coverage.put(wallet.id, ledger.coverage(wallet, today));
         }
 
-        ScrollView mainScroll = new ScrollView(this);
-        mainScroll.setFillViewport(true);
-        mainScroll.setBackgroundColor(colors.paper);
-        mainScroll.setClipToPadding(false);
-        root = column();
-        root.setPadding(dp(20), dp(12), dp(20), dp(28));
-        root.setFocusableInTouchMode(true);
-        mainScroll.addView(root);
-        setContentView(mainScroll);
-
-        LinearLayout header = row();
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        TextView logo = pill("账", colors.lime, colors.green);
-        logo.setTextSize(17);
-        header.addView(logo, new LinearLayout.LayoutParams(dp(42), dp(42)));
-        TextView heading = label("订阅账本", 23, colors.ink, true);
-        LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(0, -2, 1f);
-        headingParams.leftMargin = dp(10);
-        header.addView(heading, headingParams);
-        header.addView(action("统计", colors.card, colors.green, () -> open(StatsActivity.class)),
-                new LinearLayout.LayoutParams(dp(66), dp(44)));
-        LinearLayout.LayoutParams settingsParams = new LinearLayout.LayoutParams(dp(66), dp(44));
-        settingsParams.leftMargin = dp(6);
-        header.addView(action("设置", colors.card, colors.green, this::settings), settingsParams);
-        root.addView(header);
-        gap(root, 20);
+        int scrollY = page == null ? 0 : page.scroll.getScrollY();
+        boolean twoPane = twoPane();
+        page = new Page("订阅账本", false, !twoPane, twoPane ? 1200 : 840, twoPane ? SIDE_DP : 0);
+        page.action("统计", false, () -> open(StatsActivity.class));
+        page.action("设置", false, this::settings);
+        page.fab("添加订阅", () -> editor(null, false));
+        LinearLayout list = page.content;
+        list.setFocusableInTouchMode(true);
+        LinearLayout overview = twoPane ? page.side : list;
+        TextView date = label(TODAY.format(today), 13, colors.muted, true);
+        if (twoPane) {
+            overview.addView(date);
+            gap(overview, 12);
+        } else {
+            // Above the large title, like iOS.
+            list.addView(date, 0);
+        }
 
         summary = column();
-        root.addView(summary);
+        overview.addView(summary);
         renderSummary();
-        gap(root, 22);
+        if (twoPane) {
+            gap(overview, 16);
+            overview.addView(shortcuts());
+        } else {
+            gap(list, 8);
+        }
 
         LinearLayout section = row();
-        section.setGravity(Gravity.CENTER_VERTICAL);
-        section.addView(label("我的订阅", 22, colors.ink, true), new LinearLayout.LayoutParams(0, -2, 1f));
-        section.addView(action("＋ 添加订阅", colors.hero, Color.WHITE, () -> editor(null, false)),
-                new LinearLayout.LayoutParams(dp(112), dp(46)));
-        root.addView(section);
-        gap(root, 12);
+        section.setGravity(Gravity.BOTTOM);
+        section.addView(heading(label("我的订阅", 22, colors.ink, true)), new LinearLayout.LayoutParams(-2, -2));
+        listCount = label("", 14, colors.muted, false);
+        LinearLayout.LayoutParams countParams = new LinearLayout.LayoutParams(0, -2, 1f);
+        countParams.setMarginStart(dp(8));
+        countParams.bottomMargin = dp(2);
+        section.addView(listCount, countParams);
+        if (!twoPane) {
+            gap(list, 18);
+        }
+        list.addView(section);
+        gap(list, 12);
         EditText search = input("搜索名称、分类、付款渠道或备注", query, InputType.TYPE_CLASS_TEXT, 120);
         search.setSingleLine(true);
         search.setContentDescription("搜索订阅");
-        root.addView(search, new LinearLayout.LayoutParams(-1, -2));
-        gap(root, 10);
-        filterButtons = row();
-        root.addView(filterButtons);
-        gap(root, 12);
+        list.addView(search, new LinearLayout.LayoutParams(-1, -2));
+        gap(list, 10);
+        list.addView(segmented(FILTERS, filter, index -> {
+            filter = index;
+            updateEntries();
+            entries.setAlpha(0.35f);
+            entries.animate().alpha(1f).setDuration(200).setInterpolator(Motion.EMPHASIZED).start();
+        }), new LinearLayout.LayoutParams(-1, dp(42)));
+        gap(list, 14);
         entries = column();
-        root.addView(entries);
-        updateFilters();
+        list.addView(entries);
         updateEntries();
         search.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence text, int start, int count, int after) { }
@@ -185,6 +198,7 @@ public final class MainActivity extends LedgerActivity {
             }
             public void afterTextChanged(Editable text) { }
         });
+        page.show(scrollY);
     }
 
     private void renderSummary() {
@@ -208,58 +222,122 @@ public final class MainActivity extends LedgerActivity {
 
         summary.removeAllViews();
         LinearLayout hero = column();
-        hero.setBackground(ripple(colors.hero, 24));
-        hero.setOnClickListener(view -> open(StatsActivity.class));
-        hero.setFocusable(true);
-        hero.setPadding(dp(20), dp(18), dp(20), dp(18));
-        hero.addView(label("每月预计支出", 15, colors.heroText, true));
+        tappable(hero, colors.hero, 28, () -> open(StatsActivity.class));
+        hero.setPadding(dp(22), dp(20), dp(22), dp(20));
+        LinearLayout top = row();
+        top.addView(label("每月预计支出", 14, colors.heroText, true), new LinearLayout.LayoutParams(0, -2, 1f));
+        top.addView(label("统计 ›", 13, colors.heroText, false));
+        hero.addView(top);
         gap(hero, 8);
         if (totals.isEmpty()) {
-            hero.addView(label("—", 32, Color.WHITE, true));
+            hero.addView(amount("—", 34, colors.onHero));
         }
+        boolean first = true;
         for (Map.Entry<String, BigDecimal> total : totals.entrySet()) {
-            hero.addView(label(money(total.getKey(), total.getValue()), 27, Color.WHITE, true));
+            hero.addView(amount(money(total.getKey(), total.getValue()), first ? 34 : 24, colors.onHero));
+            first = false;
         }
         String converted = convertedSummary();
         if (converted != null) {
             gap(hero, 6);
-            hero.addView(label(converted, 14, Color.WHITE, false));
+            TextView line = label(converted, 14, colors.onHero, false);
+            line.setAlpha(0.9f);
+            hero.addView(line);
         }
-        gap(hero, 13);
-        String footer = active + " 项进行中  ·  " + upcoming + " 项近 30 天续费";
+        gap(hero, 18);
+        LinearLayout figures = row();
+        figures.addView(figure(active, "进行中"), new LinearLayout.LayoutParams(0, -2, 1f));
+        figures.addView(figure(upcoming, "30 天内续费"), new LinearLayout.LayoutParams(0, -2, 1f));
         if (trials > 0) {
-            footer += "  ·  " + trials + " 项试用中";
+            figures.addView(figure(trials, "试用中"), new LinearLayout.LayoutParams(0, -2, 1f));
         }
-        hero.addView(label(footer + "  ·  查看统计 ›", 13, colors.heroText, false));
-        summary.addView(hero, new LinearLayout.LayoutParams(-1, -2));
+        hero.addView(figures);
+        String description = "每月预计支出，" + active + " 项进行中，" + upcoming + " 项 30 天内续费"
+                + (trials > 0 ? "，" + trials + " 项试用中" : "") + "。查看统计";
+        hero.setContentDescription(description);
 
+        boolean beside = medium() && !twoPane() && !ledger.wallets.isEmpty();
+        if (beside) {
+            // Tablet: overview and balances side by side.
+            LinearLayout pair = row();
+            pair.addView(hero, new LinearLayout.LayoutParams(0, -1, 1.25f));
+            LinearLayout.LayoutParams walletParams = new LinearLayout.LayoutParams(0, -1, 1f);
+            walletParams.setMarginStart(dp(12));
+            pair.addView(walletCard(), walletParams);
+            summary.addView(pair, new LinearLayout.LayoutParams(-1, -2));
+            return;
+        }
+        summary.addView(hero, new LinearLayout.LayoutParams(-1, -2));
         if (!ledger.wallets.isEmpty()) {
-            gap(summary, 10);
-            summary.addView(walletStrip(), new LinearLayout.LayoutParams(-1, -2));
+            gap(summary, 12);
+            summary.addView(walletCard(), new LinearLayout.LayoutParams(-1, -2));
         }
     }
 
-    /** One line per balance account; accounts that cannot pay the next charge are highlighted. */
-    private View walletStrip() {
+    private View figure(long value, String caption) {
+        LinearLayout figure = column();
+        figure.addView(amount(Long.toString(value), 22, colors.onHero));
+        figure.addView(label(caption, 12, colors.heroText, false));
+        return figure;
+    }
+
+    /** One row per balance account; accounts that cannot pay the next charge are highlighted. */
+    private View walletCard() {
         boolean warning = false;
-        LinearLayout strip = column();
-        strip.setPadding(dp(15), dp(12), dp(15), dp(12));
-        strip.setFocusable(true);
-        strip.setOnClickListener(view -> open(WalletsActivity.class));
+        LinearLayout card = column();
+        card.setPadding(dp(18), dp(14), dp(18), dp(14));
+        LinearLayout header = row();
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.addView(label("余额账户", 15, colors.ink, true), new LinearLayout.LayoutParams(0, -2, 1f));
+        ImageView more = new ImageView(this);
+        more.setImageDrawable(new Glyph(Glyph.FORWARD, colors.muted, dp(18)));
+        header.addView(more, new LinearLayout.LayoutParams(dp(18), dp(18)));
+        card.addView(header);
         for (Wallet wallet : ledger.wallets) {
             Ledger.Coverage cover = coverage.get(wallet.id);
-            String line = wallet.name + "  " + money(wallet.currency, wallet.balance);
+            gap(card, 10);
+            LinearLayout line = row();
+            line.addView(label(wallet.name, 15, colors.ink, false), new LinearLayout.LayoutParams(0, -2, 1f));
+            line.addView(amount(money(wallet.currency, wallet.balance), 15,
+                    wallet.balance.signum() < 0 || cover.insufficient() ? colors.amber : colors.green));
+            card.addView(line);
+            String status = null;
             if (cover.insufficient()) {
                 warning = true;
-                line += "  ·  不够 " + cover.next + " 的扣款";
+                status = "不够 " + cover.next + " 的扣款";
             } else if (cover.paidUntil != null && !cover.beyondHorizon) {
-                line += "  ·  可用到 " + cover.paidUntil;
+                status = "可用到 " + cover.paidUntil;
             }
-            strip.addView(label(line, 14, cover.insufficient() ? colors.amber : colors.ink, cover.insufficient()));
+            if (status != null) {
+                card.addView(label(status, 12, cover.insufficient() ? colors.amber : colors.muted, cover.insufficient()));
+            }
         }
-        strip.addView(label("余额账户 ›", 12, colors.muted, false));
-        strip.setBackground(ripple(warning ? colors.lime : colors.card, 18));
-        return strip;
+        tappable(card, warning ? colors.lime : colors.card, 24, () -> open(WalletsActivity.class));
+        return card;
+    }
+
+    /** The overview pane's links on expanded windows, so the settings menu is not the only way in. */
+    private View shortcuts() {
+        LinearLayout group = group();
+        String[] names = {"余额账户", "扣款记录", "支出统计与汇率", "按月导出账单与发票"};
+        Runnable[] actions = {() -> open(WalletsActivity.class), () -> open(HistoryActivity.class),
+                () -> open(StatsActivity.class), this::chooseMonthToExport};
+        for (int i = 0; i < names.length; i++) {
+            Runnable action = actions[i];
+            LinearLayout line = row();
+            line.setGravity(Gravity.CENTER_VERTICAL);
+            line.setMinimumHeight(dp(52));
+            line.setPadding(dp(18), 0, dp(14), 0);
+            line.addView(label(names[i], 15, colors.ink, false), new LinearLayout.LayoutParams(0, -2, 1f));
+            ImageView chevron = new ImageView(this);
+            chevron.setImageDrawable(new Glyph(Glyph.FORWARD, colors.muted, dp(18)));
+            line.addView(chevron, new LinearLayout.LayoutParams(dp(18), dp(18)));
+            line.setBackground(ripple(android.graphics.Color.TRANSPARENT, 0));
+            line.setFocusable(true);
+            line.setOnClickListener(view -> action.run());
+            addRow(group, line);
+        }
+        return group;
     }
 
     /** One line with the base-currency total, or null when there is nothing to convert. */
@@ -291,22 +369,14 @@ public final class MainActivity extends LedgerActivity {
         startActivity(new Intent(this, screen));
     }
 
-    private void updateFilters() {
-        filterButtons.removeAllViews();
-        for (int i = 0; i < FILTERS.length; i++) {
-            final int index = i;
-            TextView button = action(FILTERS[i], i == filter ? colors.lime : colors.card, colors.green, () -> {
-                filter = index;
-                updateFilters();
-                updateEntries();
-            });
-            button.setSelected(i == filter);
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(44), 1f);
-            if (i > 0) {
-                params.leftMargin = dp(6);
-            }
-            filterButtons.addView(button, params);
+    /** List width in dp, for choosing the number of card columns. */
+    private int listWidthDp() {
+        if (twoPane()) {
+            float density = getResources().getDisplayMetrics().density;
+            int insets = Math.round((insetLeft + insetRight) / density);
+            return Math.min(1200, widthDp() - insets - SIDE_DP - 16 - margin());
         }
+        return contentWidthDp(840);
     }
 
     private void updateEntries() {
@@ -325,19 +395,21 @@ public final class MainActivity extends LedgerActivity {
         }
         visible.sort(Comparator.comparing((Subscription entry) -> entry.nextDate(today))
                 .thenComparing(entry -> entry.title, String.CASE_INSENSITIVE_ORDER));
+        listCount.setText(visible.isEmpty() ? "" : visible.size() + " 项");
+        List<View> cards = new ArrayList<>();
         for (Subscription entry : visible) {
-            entries.addView(subscriptionCard(entry), new LinearLayout.LayoutParams(-1, -2));
-            gap(entries, 9);
+            cards.add(subscriptionCard(entry));
         }
+        grid(entries, cards, columns(listWidthDp(), 300, 12), 12);
         if (visible.isEmpty()) {
-            LinearLayout empty = panel(colors.card, 18);
+            LinearLayout empty = panel(colors.card, 24);
             if (ledger.subscriptions.isEmpty()) {
                 empty.addView(label("添加第一份订阅", 18, colors.ink, true));
                 gap(empty, 5);
                 empty.addView(label("记录下一次续费日期、扣款金额和付款渠道。", 14, colors.muted, false));
-                gap(empty, 9);
-                empty.addView(action("使用 Claude 模板", colors.line, colors.green, () -> editor(null, true)),
-                        new LinearLayout.LayoutParams(-1, dp(46)));
+                gap(empty, 12);
+                empty.addView(action("使用 Claude 模板", colors.lime, colors.green, () -> editor(null, true)),
+                        new LinearLayout.LayoutParams(-1, dp(48)));
             } else {
                 String message = !needle.isEmpty() ? "没有匹配的订阅"
                         : filter == 1 ? "近 30 天没有待续费订阅" : "这个分类暂时没有订阅";
@@ -353,23 +425,25 @@ public final class MainActivity extends LedgerActivity {
     }
 
     private View subscriptionCard(Subscription entry) {
-        LinearLayout card = panel(colors.card, 18);
-        card.setBackground(ripple(colors.card, 18));
-        card.setOnClickListener(view -> details(entry));
-        card.setFocusable(true);
+        LinearLayout card = panel(colors.card, 24);
+        tappable(card, colors.card, 24, () -> details(entry));
+        card.setOnLongClickListener(view -> {
+            quickActions(entry);
+            return true;
+        });
         card.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(40), dp(40));
-        iconParams.rightMargin = dp(12);
-        card.addView(iconView(entry, entry.title, 40), iconParams);
+        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(46), dp(46));
+        iconParams.setMarginEnd(dp(14));
+        card.addView(iconView(entry, entry.title, 46), iconParams);
         LinearLayout content = column();
         card.addView(content, new LinearLayout.LayoutParams(0, -2, 1f));
         LinearLayout top = row();
         top.setGravity(Gravity.TOP);
         TextView name = label(entry.title, 17, colors.ink, true);
         LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(0, -2, 1f);
-        nameParams.rightMargin = dp(10);
+        nameParams.setMarginEnd(dp(10));
         top.addView(name, nameParams);
-        TextView price = label(money(entry.currency, entry.amount), 16, colors.green, true);
+        TextView price = amount(money(entry.currency, entry.amount), 16, colors.green);
         price.setGravity(Gravity.END);
         top.addView(price);
         content.addView(top);
@@ -398,7 +472,7 @@ public final class MainActivity extends LedgerActivity {
         }
         content.addView(label(String.join(" · ", parts), 13, colors.muted, false));
         if (entry.mode != Subscription.Mode.ENDED) {
-            gap(content, 7);
+            gap(content, 8);
             LocalDate next = entry.nextDate(today);
             long days = ChronoUnit.DAYS.between(today, next);
             String relative = days < 0 ? "已过期" : days == 0 ? "今天" : days + " 天后";
@@ -409,85 +483,141 @@ public final class MainActivity extends LedgerActivity {
                 line += "  ·  余额不足";
             }
             boolean urgent = days <= 7 || walletShort(entry);
-            content.addView(label(line, 13, urgent ? colors.amber : colors.green, true));
+            TextView when = label(line, 13, urgent ? colors.amber : colors.green, true);
+            content.addView(when);
         }
         return card;
     }
 
-    private void details(Subscription entry) {
-        StringBuilder text = new StringBuilder(money(entry.currency, entry.amount))
-                .append(" · ").append(entry.cycle.label).append(" · ").append(entry.mode.label);
-        if (entry.mode != Subscription.Mode.ENDED) {
-            LocalDate next = entry.nextDate(today);
-            text.append(entry.trial ? "\n试用至 " + next + "，之后开始扣费" : "\n下次续费 " + next);
-            text.append("\n").append(reminderLabel(entry.reminderDays, entry.trial));
+    /** Long-press shortcuts on a subscription card. */
+    private void quickActions(Subscription entry) {
+        List<String> items = new ArrayList<>();
+        List<Runnable> handlers = new ArrayList<>();
+        items.add("编辑");
+        handlers.add(() -> editor(entry, false));
+        if (entry.mode == Subscription.Mode.MANUAL) {
+            items.add("记录已续费");
+            handlers.add(() -> confirmManualRenewal(entry));
         }
+        items.add("扣款记录");
+        handlers.add(() -> openHistory(entry));
+        items.add("删除");
+        handlers.add(() -> confirmDelete(entry));
+        menu(entry.title, items.toArray(new String[0]), handlers.toArray(new Runnable[0]), items.size() - 1);
+    }
+
+    private void openHistory(Subscription entry) {
+        startActivity(new Intent(this, HistoryActivity.class).putExtra(HistoryActivity.SUBSCRIPTION, entry.id));
+    }
+
+    private void details(Subscription entry) {
+        Sheet sheet = sheet(entry.title).detents(0.62f, 1f).titleOnScroll();
+        sheet.trailing("编辑", () -> {
+            editor(entry, false);
+            return true;
+        });
+        LinearLayout body = sheet.body;
+
+        LinearLayout top = row();
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(60), dp(60));
+        iconParams.setMarginEnd(dp(16));
+        top.addView(iconView(entry, entry.title, 60), iconParams);
+        LinearLayout titles = column();
+        titles.addView(heading(label(entry.title, 22, colors.ink, true)));
+        gap(titles, 2);
+        titles.addView(label(money(entry.currency, entry.amount) + " · " + entry.cycle.label + " · "
+                + entry.mode.label, 14, colors.muted, false));
+        top.addView(titles, new LinearLayout.LayoutParams(0, -2, 1f));
+        body.addView(top);
+
+        if (entry.mode != Subscription.Mode.ENDED) {
+            gap(body, 16);
+            LocalDate next = entry.nextDate(today);
+            long days = ChronoUnit.DAYS.between(today, next);
+            LinearLayout when = panel(colors.lime, 22);
+            when.addView(label(entry.trial ? "试用至" : "下次续费", 13, colors.green, true));
+            gap(when, 2);
+            when.addView(amount(next.toString(), 24, colors.ink));
+            String relative = days < 0 ? "已过期" : days == 0 ? "就是今天" : days + " 天后";
+            when.addView(label(relative + (entry.trial ? "，之后开始扣费" : "") + " · "
+                    + reminderLabel(entry.reminderDays, entry.trial), 13, colors.muted, false));
+            body.addView(when);
+        }
+
+        gap(body, 12);
+        LinearLayout buttons = row();
+        if (entry.mode == Subscription.Mode.MANUAL) {
+            buttons.addView(action("记录已续费", colors.hero, colors.onHero, () -> {
+                sheet.dismiss();
+                confirmManualRenewal(entry);
+            }), new LinearLayout.LayoutParams(0, dp(48), 1f));
+        }
+        LinearLayout.LayoutParams historyParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        if (buttons.getChildCount() > 0) {
+            historyParams.setMarginStart(dp(10));
+        }
+        buttons.addView(action("扣款记录", colors.card, colors.green, () -> {
+            sheet.dismiss();
+            openHistory(entry);
+        }), historyParams);
+        body.addView(buttons);
+
+        LinearLayout facts = group();
         if (!entry.category.isEmpty()) {
-            text.append("\n分类 ").append(entry.category);
+            addRow(facts, factRow("分类", entry.category, colors.ink));
         }
         Ledger.Money real = ledger.realCost(entry);
         if (entry.hasCost()) {
-            text.append("\n每期实际成本 ").append(money(real.currency, real.amount));
+            addRow(facts, factRow("每期实际成本", money(real.currency, real.amount), colors.ink));
         } else if (!real.currency.equals(entry.currency)) {
-            text.append("\n每期实际成本约 ").append(money(real.currency, real.amount)).append("（按余额账户成本）");
+            addRow(facts, factRow("每期实际成本", "约 " + money(real.currency, real.amount) + "（按余额账户成本）", colors.ink));
         }
         if (entry.splitWays > 1) {
-            text.append("\n").append(entry.splitWays).append(" 人分摊，我承担约 ")
-                    .append(money(real.currency, entry.myShare(real.amount))).append(" / 期");
+            addRow(facts, factRow("分摊", entry.splitWays + " 人，我承担约 "
+                    + money(real.currency, entry.myShare(real.amount)) + " / 期", colors.ink));
         }
         Wallet wallet = ledger.payingWallet(entry);
         if (wallet != null) {
-            text.append("\n从「").append(wallet.name).append("」扣款，余额 ")
-                    .append(money(wallet.currency, wallet.balance));
-            if (walletShort(entry)) {
-                text.append("，不够下次扣款");
-            }
+            boolean short_ = walletShort(entry);
+            addRow(facts, factRow("扣款账户", wallet.name + "，余额 " + money(wallet.currency, wallet.balance)
+                    + (short_ ? "，不够下次扣款" : ""), short_ ? colors.amber : colors.ink));
         } else if (entry.walletId != null) {
-            text.append("\n所选余额账户币种与订阅不同，未自动扣款");
+            addRow(facts, factRow("扣款账户", "币种与订阅不同，未自动扣款", colors.amber));
         }
         if (!entry.payment.isEmpty()) {
-            text.append("\n付款渠道 ").append(entry.payment);
+            addRow(facts, factRow("付款渠道", entry.payment, colors.ink));
+        }
+        if (facts.getChildCount() > 0) {
+            gap(body, 12);
+            body.addView(facts);
         }
         if (!entry.prices.isEmpty()) {
-            text.append("\n\n价格变动");
+            section(body, "价格变动");
+            LinearLayout prices = group();
             for (Subscription.PricePoint price : entry.prices) {
-                text.append("\n").append(price.until).append(" 前 ").append(money(price.currency, price.amount));
+                addRow(prices, factRow(price.until + " 前", money(price.currency, price.amount), colors.muted));
             }
-            text.append("\n现在 ").append(money(entry.currency, entry.amount));
+            addRow(prices, factRow("现在", money(entry.currency, entry.amount), colors.ink));
+            body.addView(prices);
         }
         if (!entry.note.isEmpty()) {
-            text.append("\n\n").append(entry.note);
+            section(body, "备注");
+            LinearLayout note = panel(colors.card, 22);
+            note.addView(label(entry.note, 15, colors.ink, false));
+            body.addView(note);
         }
-        LinearLayout body = column();
-        body.setPadding(dp(24), dp(8), dp(24), dp(4));
-        body.addView(label(text.toString(), 15, colors.ink, false));
-        gap(body, 14);
-        gap(body, 4);
-        body.addView(label("每期账单与发票", 16, colors.ink, true));
+        section(body, "每期账单与发票");
         body.addView(label("点 ＋ 上传这一期的发票；点按缩略图查看，长按可删除或移到其他账期。", 12, colors.muted, false));
-        gap(body, 8);
+        gap(body, 10);
         LinearLayout periods = column();
         body.addView(periods);
         renderPeriods(periods, entry.id);
-        gap(body, 14);
-        body.addView(label("订阅资料", 16, colors.ink, true));
+        section(body, "订阅资料");
         body.addView(label("不属于某一期的截图，例如套餐页面。", 12, colors.muted, false));
-        gap(body, 6);
+        gap(body, 10);
         body.addView(new AttachmentStrip(entry.id), new LinearLayout.LayoutParams(-1, -2));
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(body);
-        AlertDialog.Builder dialog = new AlertDialog.Builder(this).setTitle(entry.title)
-                .setIcon(IconDrawable.of(this, entry, entry.title, dp(32), colors.line))
-                .setView(scroll)
-                .setPositiveButton("编辑", (whichDialog, button) -> editor(entry, false))
-                .setNegativeButton("关闭", null);
-        if (entry.mode == Subscription.Mode.MANUAL) {
-            dialog.setNeutralButton("记录已续费", (whichDialog, button) -> confirmManualRenewal(entry));
-        } else {
-            dialog.setNeutralButton("扣款记录", (whichDialog, button) -> startActivity(
-                    new Intent(this, HistoryActivity.class).putExtra(HistoryActivity.SUBSCRIPTION, entry.id)));
-        }
-        dialog.show();
+        sheet.show();
     }
 
     private static final int PERIODS_SHOWN = 6;
@@ -508,29 +638,34 @@ public final class MainActivity extends LedgerActivity {
         LocalDate due = entry.lastDue(now);
         boolean missing = due != null && (history.isEmpty() || history.get(0).date.isBefore(due));
         if (missing) {
-            LinearLayout box = panel(colors.lime, 14);
-            box.addView(label(due + " 这一期还没有扣款记录", 14, colors.ink, true));
+            LinearLayout box = panel(colors.lime, 22);
+            box.addView(label(due + " 这一期还没有扣款记录", 15, colors.ink, true));
             gap(box, 2);
             box.addView(label("补记后即可上传这一期的发票。补记不会改动余额账户。", 12, colors.muted, false));
-            gap(box, 8);
+            gap(box, 10);
             box.addView(action("补记 " + money(entry.currency, entry.amount), colors.card, colors.green,
-                    () -> backfillPeriod(entry.id, due, periods)), new LinearLayout.LayoutParams(-1, dp(44)));
+                    () -> backfillPeriod(entry.id, due, periods)), new LinearLayout.LayoutParams(-1, dp(46)));
             periods.addView(box);
             gap(periods, 10);
         }
         for (int i = 0; i < Math.min(PERIODS_SHOWN, history.size()); i++) {
             Payment payment = history.get(i);
-            periods.addView(label(payment.date + " · " + money(payment.currency, payment.amount)
-                    + (payment.auto ? "" : " · 手动记录"), 14, colors.ink, true));
-            gap(periods, 4);
-            periods.addView(new AttachmentStrip(payment.id), new LinearLayout.LayoutParams(-1, -2));
+            LinearLayout card = panel(colors.card, 22);
+            LinearLayout heading = row();
+            heading.addView(label(payment.date.toString(), 15, colors.ink, true), new LinearLayout.LayoutParams(0, -2, 1f));
+            heading.addView(amount(money(payment.currency, payment.amount), 15, colors.green));
+            card.addView(heading);
+            if (!payment.auto) {
+                card.addView(label("手动记录", 12, colors.muted, false));
+            }
+            gap(card, 10);
+            card.addView(new AttachmentStrip(payment.id), new LinearLayout.LayoutParams(-1, -2));
+            periods.addView(card);
             gap(periods, 10);
         }
         if (history.size() > PERIODS_SHOWN) {
             periods.addView(action("查看全部 " + history.size() + " 期", colors.line, colors.green,
-                    () -> startActivity(new Intent(this, HistoryActivity.class)
-                            .putExtra(HistoryActivity.SUBSCRIPTION, entry.id))),
-                    new LinearLayout.LayoutParams(-1, dp(44)));
+                    () -> openHistory(entry)), new LinearLayout.LayoutParams(-1, dp(46)));
         } else if (history.isEmpty() && !missing) {
             periods.addView(label("还没有扣款记录。续费后会出现在这里，届时可上传那一期的发票。",
                     13, colors.muted, false));
@@ -558,7 +693,7 @@ public final class MainActivity extends LedgerActivity {
         String message = "将记录一笔 " + money(entry.currency, entry.amount) + " 的扣款"
                 + (wallet == null ? "" : "，并从「" + wallet.name + "」扣除")
                 + "。\n下次续费日将更新为 " + entry.occurrence(1) + "。";
-        new AlertDialog.Builder(this).setTitle("记录已续费").setMessage(message)
+        alert().setTitle("记录已续费").setMessage(message)
                 .setNegativeButton("取消", null)
                 .setPositiveButton("确定", (confirm, choice) -> {
                     RenewalReminder.clearReceipt(this, entry.id);
@@ -570,27 +705,27 @@ public final class MainActivity extends LedgerActivity {
     }
 
     private void editor(Subscription entry, boolean claudeTemplate) {
-        LinearLayout fields = column();
-        fields.setPadding(dp(22), dp(8), dp(22), dp(14));
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(fields);
+        Sheet sheet = sheet(entry == null ? "添加订阅" : "编辑订阅").detents(0.62f, 1f).expanded();
+        LinearLayout fields = sheet.body;
 
         EditText name = input("例如 Claude Pro", entry == null
                 ? claudeTemplate ? "Claude Pro" : "" : entry.title,
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES, 100);
-        addField(fields, "订阅名称", name);
         IconChoice icon = new IconChoice(entry);
         ImageView iconPreview = new ImageView(this);
-        iconPreview.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        Runnable refreshIcon = () -> iconPreview.setImageDrawable(icon.drawable(fieldValue(name), 48));
-        LinearLayout iconRow = row();
-        iconRow.setGravity(Gravity.CENTER_VERTICAL);
-        iconRow.addView(iconPreview, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        LinearLayout.LayoutParams changeParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        changeParams.leftMargin = dp(12);
-        iconRow.addView(action("更换图标", colors.line, colors.green,
-                () -> iconDialog(icon, fieldValue(name), refreshIcon)), changeParams);
-        addField(fields, "图标", iconRow);
+        iconPreview.setContentDescription("更换图标");
+        Runnable refreshIcon = () -> iconPreview.setImageDrawable(icon.drawable(fieldValue(name), 52));
+        iconPreview.setOnClickListener(view -> iconDialog(icon, fieldValue(name), refreshIcon));
+        Motion.pressable(iconPreview, 0.92f);
+        LinearLayout nameRow = row();
+        nameRow.setGravity(Gravity.CENTER_VERTICAL);
+        nameRow.addView(iconPreview, new LinearLayout.LayoutParams(dp(52), dp(52)));
+        LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(0, -2, 1f);
+        nameParams.setMarginStart(dp(12));
+        name.setContentDescription("订阅名称");
+        nameRow.addView(name, nameParams);
+        addField(fields, "订阅名称", nameRow);
+        hint(fields, "点按图标可换成图片，或修改文字和颜色。");
         refreshIcon.run();
         name.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence text, int start, int count, int after) { }
@@ -599,35 +734,50 @@ public final class MainActivity extends LedgerActivity {
             }
             public void afterTextChanged(Editable text) { }
         });
-        EditText amount = input("填写账单金额", entry == null ? "" : entry.amount.toPlainString(),
+
+        LinearLayout priceRow = row();
+        EditText amount = input("账单金额", entry == null ? "" : entry.amount.toPlainString(),
                 InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL, 20);
-        addField(fields, "单次金额", amount);
-        EditText currency = input("三字母币种代码，例如 CNY、USD、JPY",
-                entry == null ? claudeTemplate ? "USD" : "CNY" : entry.currency,
+        amount.setContentDescription("单次金额");
+        priceRow.addView(amount, new LinearLayout.LayoutParams(0, -2, 1f));
+        EditText currency = input("币种", entry == null ? claudeTemplate ? "USD" : "CNY" : entry.currency,
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS, 3);
-        addField(fields, "币种", currency);
-        Spinner cycle = options(labels(Subscription.Cycle.values()),
-                entry == null ? Subscription.Cycle.MONTHLY.ordinal() : entry.cycle.ordinal());
+        currency.setContentDescription("币种，三字母代码，例如 CNY、USD、JPY");
+        LinearLayout.LayoutParams currencyParams = new LinearLayout.LayoutParams(dp(96), -2);
+        currencyParams.setMarginStart(dp(8));
+        priceRow.addView(currency, currencyParams);
+        addField(fields, "单次金额与币种", priceRow);
+
+        Segmented cycle = segmented(labels(Subscription.Cycle.values()),
+                entry == null ? Subscription.Cycle.MONTHLY.ordinal() : entry.cycle.ordinal(), null);
         addField(fields, "账单周期", cycle);
-        Spinner mode = options(labels(Subscription.Mode.values()),
-                entry == null ? Subscription.Mode.AUTO.ordinal() : entry.mode.ordinal());
+        cycle.getLayoutParams().height = dp(42);
+        Segmented mode = segmented(labels(Subscription.Mode.values()),
+                entry == null ? Subscription.Mode.AUTO.ordinal() : entry.mode.ordinal(), null);
         addField(fields, "续费状态", mode);
+        mode.getLayoutParams().height = dp(42);
+
         LocalDate[] selectedDate = {entry == null ? templateDate(claudeTemplate) : entry.anchor};
-        TextView date = action(selectedDate[0].toString(), colors.paper, colors.green, null);
+        TextView date = pickerField(selectedDate[0].toString());
         date.setOnClickListener(view -> chooseDate(selectedDate[0], selected -> {
             selectedDate[0] = selected;
             date.setText(selected.toString());
         }));
         addField(fields, "账单续费日期", date);
-        fields.addView(label("自动续费按此日期推算后续账期。", 12, colors.muted, false));
-        CheckBox trial = check("免费试用中：上面的日期填试用结束、开始扣费的日子", entry != null && entry.trial);
+        hint(fields, "自动续费按此日期推算后续账期。");
+        CompoundButton trial = check("免费试用中", entry != null && entry.trial);
         fields.addView(trial, new LinearLayout.LayoutParams(-1, -2));
+        TextView trialHint = label("试用时，上面的日期填试用结束、开始扣费的日子。", 12, colors.muted, false);
+        trialHint.setPadding(dp(4), 0, dp(4), 0);
+        fields.addView(trialHint);
 
         EditText days = input("0–90，留空关闭提醒", entry == null ? "3"
                 : entry.reminderDays < 0 ? "" : Integer.toString(entry.reminderDays),
                 InputType.TYPE_CLASS_NUMBER, 2);
         addField(fields, "提前提醒天数", days);
 
+        // Optional details, folded away until wanted (or already filled in).
+        LinearLayout more = column();
         Set<String> categoryOptions = new LinkedHashSet<>();
         for (Subscription existing : ledger.subscriptions) {
             if (!existing.category.isEmpty()) {
@@ -638,12 +788,12 @@ public final class MainActivity extends LedgerActivity {
         AutoCompleteTextView category = suggestInput("例如 AI、影音、云存储",
                 entry == null ? claudeTemplate ? "AI" : "" : entry.category,
                 new ArrayList<>(categoryOptions), 30);
-        addField(fields, "分类（选填）", category);
+        addField(more, "分类", category);
 
         EditText payment = input("例如美区 Apple ID 礼品卡余额", entry == null
                 ? claudeTemplate ? "美区 Apple ID 礼品卡余额" : "" : entry.payment,
                 InputType.TYPE_CLASS_TEXT, 120);
-        addField(fields, "付款渠道（选填）", payment);
+        addField(more, "付款渠道", payment);
 
         String[] walletLabels = new String[ledger.wallets.size() + 1];
         walletLabels[0] = "不从余额账户扣款";
@@ -657,8 +807,8 @@ public final class MainActivity extends LedgerActivity {
         }
         Spinner walletChoice = options(walletLabels, walletIndex);
         if (!ledger.wallets.isEmpty()) {
-            addField(fields, "从余额账户扣款（选填）", walletChoice);
-            fields.addView(label("续费时自动从该账户扣除，账户币种需与订阅一致。", 12, colors.muted, false));
+            addField(more, "从余额账户扣款", walletChoice);
+            hint(more, "续费时自动从该账户扣除，账户币种需与订阅一致。");
         }
 
         LinearLayout costRow = row();
@@ -671,62 +821,91 @@ public final class MainActivity extends LedgerActivity {
                 ? entry.costCurrency : rateStore().load().base,
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS, 3);
         costCode.setContentDescription("每期实际成本币种");
-        LinearLayout.LayoutParams costCodeParams = new LinearLayout.LayoutParams(dp(84), -2);
-        costCodeParams.leftMargin = dp(8);
+        LinearLayout.LayoutParams costCodeParams = new LinearLayout.LayoutParams(dp(96), -2);
+        costCodeParams.setMarginStart(dp(8));
         costRow.addView(costCode, costCodeParams);
-        addField(fields, "每期实际成本（选填）", costRow);
-        fields.addView(label("每期真实花了多少钱。留空时，从余额账户扣款的按账户成本计算，其余按当前汇率。",
-                12, colors.muted, false));
+        addField(more, "每期实际成本", costRow);
+        hint(more, "每期真实花了多少钱。留空时，从余额账户扣款的按账户成本计算，其余按当前汇率。");
 
         EditText split = input("1 表示不分摊", entry == null ? "1" : Integer.toString(entry.splitWays),
                 InputType.TYPE_CLASS_NUMBER, 2);
-        addField(fields, "分摊人数（含自己）", split);
-        fields.addView(label("统计只计入你承担的部分。", 12, colors.muted, false));
+        addField(more, "分摊人数（含自己）", split);
+        hint(more, "统计只计入你承担的部分。");
 
         EditText note = input("例如扣款账号的备注", entry == null ? "" : entry.note,
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE, 500);
-        addField(fields, "备注（选填）", note);
+        addField(more, "备注", note);
 
-        AlertDialog.Builder builder = new AlertDialog.Builder(this)
-                .setTitle(entry == null ? "添加订阅" : "编辑订阅")
-                .setView(scroll).setNegativeButton("取消", null)
-                .setPositiveButton("保存", null);
+        boolean filled = entry != null && (!entry.category.isEmpty() || !entry.payment.isEmpty()
+                || entry.walletId != null || entry.hasCost() || entry.splitWays > 1 || !entry.note.isEmpty());
+        gap(fields, 16);
+        TextView disclosure = label("", 15, colors.green, true);
+        disclosure.setGravity(Gravity.CENTER_VERTICAL);
+        disclosure.setMinHeight(dp(52));
+        disclosure.setPadding(dp(16), 0, dp(16), 0);
+        tappable(disclosure, colors.card, 16, () -> { });
+        Runnable[] toggle = new Runnable[1];
+        toggle[0] = () -> {
+            boolean open = more.getVisibility() != View.VISIBLE;
+            more.setVisibility(open ? View.VISIBLE : View.GONE);
+            disclosure.setText(open ? "收起选填项" : "更多：分类、付款渠道、余额账户、实际成本、分摊、备注");
+            if (open) {
+                more.setAlpha(0f);
+                more.animate().alpha(1f).setDuration(220).setInterpolator(Motion.EMPHASIZED).start();
+            }
+        };
+        more.setVisibility(filled || claudeTemplate ? View.GONE : View.VISIBLE);
+        toggle[0].run();
+        disclosure.setOnClickListener(view -> toggle[0].run());
+        fields.addView(disclosure, new LinearLayout.LayoutParams(-1, -2));
+        fields.addView(more);
+
         if (entry != null) {
-            builder.setNeutralButton("删除", (dialog, button) -> confirmDelete(entry));
+            gap(fields, 24);
+            fields.addView(action("删除订阅", colors.card, colors.amber, () -> confirmDelete(entry, sheet)),
+                    new LinearLayout.LayoutParams(-1, dp(50)));
         }
-        AlertDialog dialog = builder.create();
+
+        Supplier<String> state = () -> String.join("\u0001", fieldValue(name), fieldValue(amount),
+                fieldValue(currency), Integer.toString(cycle.selected()), Integer.toString(mode.selected()),
+                selectedDate[0].toString(), Boolean.toString(trial.isChecked()), fieldValue(days),
+                fieldValue(category), fieldValue(payment), Integer.toString(walletChoice.getSelectedItemPosition()),
+                fieldValue(costAmount), fieldValue(costCode), fieldValue(split), fieldValue(note),
+                String.valueOf(icon.text), String.valueOf(icon.color), String.valueOf(icon.image));
+        String initial = state.get();
+        sheet.unsaved(() -> !state.get().equals(initial));
+        sheet.leading("取消", sheet::cancel);
         // A picture picked in this editor but not saved is deleted.
-        dialog.setOnDismissListener(closed -> icon.discardPicked());
-        dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
-                | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
-        dialog.show();
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+        sheet.onDismiss(icon::discardPicked);
+        sheet.trailing("保存", () -> {
             String title = fieldValue(name);
             if (title.isEmpty()) {
                 name.setError("请填写订阅名称");
-                return;
+                return false;
             }
             BigDecimal value = parseAmount(fieldValue(amount));
             if (value == null) {
                 amount.setError("请输入有效金额，例如 20 或 19.99");
-                return;
+                return false;
             }
             String code = fieldValue(currency).toUpperCase(Locale.ROOT);
             if (!validCurrency(code)) {
                 currency.setError("请输入有效币种，例如 CNY、USD 或 JPY");
-                return;
+                return false;
             }
             BigDecimal costValue = null;
             String costCurrency = fieldValue(costCode).toUpperCase(Locale.ROOT);
             if (!fieldValue(costAmount).isEmpty()) {
                 costValue = parseAmount(fieldValue(costAmount));
                 if (costValue == null) {
+                    revealMore(more, toggle[0]);
                     costAmount.setError("请输入有效金额，或留空");
-                    return;
+                    return false;
                 }
                 if (!validCurrency(costCurrency)) {
+                    revealMore(more, toggle[0]);
                     costCode.setError("请输入有效币种，例如 CNY");
-                    return;
+                    return false;
                 }
             }
             int ways;
@@ -736,21 +915,22 @@ public final class MainActivity extends LedgerActivity {
                 ways = 0;
             }
             if (ways < 1 || ways > Subscription.MAX_SPLIT) {
+                revealMore(more, toggle[0]);
                 split.setError("请输入 1–99");
-                return;
+                return false;
             }
             Wallet wallet = walletChoice.getSelectedItemPosition() == 0 ? null
                     : ledger.wallets.get(walletChoice.getSelectedItemPosition() - 1);
             if (wallet != null && !wallet.currency.equals(code)) {
                 toast("「" + wallet.name + "」是 " + wallet.currency + " 账户，与订阅币种 " + code + " 不一致");
-                return;
+                return false;
             }
             Subscription.Builder b = entry == null ? new Subscription.Builder() : entry.toBuilder();
             b.title = title;
             b.amount = value;
             b.currency = code;
-            b.cycle = Subscription.Cycle.values()[cycle.getSelectedItemPosition()];
-            b.mode = Subscription.Mode.values()[mode.getSelectedItemPosition()];
+            b.cycle = Subscription.Cycle.values()[cycle.selected()];
+            b.mode = Subscription.Mode.values()[mode.selected()];
             b.anchor = selectedDate[0];
             if (entry != null && entry.mode == Subscription.Mode.AUTO
                     && b.mode == Subscription.Mode.MANUAL && b.anchor.equals(entry.anchor)) {
@@ -784,29 +964,38 @@ public final class MainActivity extends LedgerActivity {
                 updated = b.build();
             } catch (IllegalArgumentException ex) {
                 toast("请检查金额和实际成本的小数位、日期和提醒天数（0–90）");
-                return;
+                return false;
             }
             if (icon.image != null && icon.image.equals(icon.picked)) {
                 if (!AttachmentStore.moveIcon(this, icon.image)) {
                     toast("无法保存图标图片，请重新选择");
-                    return;
+                    return false;
                 }
                 icon.picked = null;
             }
-            boolean first = ledger.subscriptions.isEmpty();
+            boolean firstEntry = ledger.subscriptions.isEmpty();
             boolean resetReminder = entry != null && (entry.reminderDays != updated.reminderDays
                     || entry.mode != updated.mode || entry.cycle != updated.cycle
                     || entry.trial != updated.trial || !entry.anchor.equals(updated.anchor));
-            if (save(updated, resetReminder)) {
-                dialog.dismiss();
-                if (first && updated.mode != Subscription.Mode.ENDED
-                        && updated.reminderDays >= 0 && Build.VERSION.SDK_INT >= 33
-                        && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                        != PackageManager.PERMISSION_GRANTED) {
-                    requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATIONS);
-                }
+            if (!save(updated, resetReminder)) {
+                return false;
             }
+            if (firstEntry && updated.mode != Subscription.Mode.ENDED
+                    && updated.reminderDays >= 0 && Build.VERSION.SDK_INT >= 33
+                    && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATIONS);
+            }
+            return true;
         });
+        sheet.show();
+    }
+
+    /** Unfolds the optional fields so a validation error on one of them is visible. */
+    private static void revealMore(LinearLayout more, Runnable toggle) {
+        if (more.getVisibility() != View.VISIBLE) {
+            toggle.run();
+        }
     }
 
     /** Icon settings being edited in the subscription editor. */
@@ -854,11 +1043,11 @@ public final class MainActivity extends LedgerActivity {
 
     /** Edits {@code icon} in place; {@code changed} refreshes the editor's preview. */
     private void iconDialog(IconChoice icon, String title, Runnable changed) {
-        LinearLayout body = column();
-        body.setPadding(dp(22), dp(8), dp(22), dp(8));
+        Sheet sheet = sheet("图标").detents(0.7f, 1f);
+        LinearLayout body = sheet.body;
         ImageView preview = new ImageView(this);
         preview.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(dp(72), dp(72));
+        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(dp(84), dp(84));
         previewParams.gravity = Gravity.CENTER_HORIZONTAL;
         body.addView(preview, previewParams);
         LinearLayout pictureRow = row();
@@ -872,14 +1061,14 @@ public final class MainActivity extends LedgerActivity {
 
         Runnable[] update = new Runnable[1];
         update[0] = () -> {
-            preview.setImageDrawable(icon.drawable(title, 72));
+            preview.setImageDrawable(icon.drawable(title, 84));
             pictureRow.removeAllViews();
-            pictureRow.addView(action(icon.image == null ? "从相册选图" : "换一张图片", colors.line, colors.green,
-                    () -> pickIcon(icon, update[0])), new LinearLayout.LayoutParams(0, dp(46), 1f));
+            pictureRow.addView(action(icon.image == null ? "从相册选图" : "换一张图片", colors.card, colors.green,
+                    () -> pickIcon(icon, update[0])), new LinearLayout.LayoutParams(0, dp(48), 1f));
             if (icon.image != null) {
-                LinearLayout.LayoutParams removeParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
-                removeParams.leftMargin = dp(8);
-                pictureRow.addView(action("移除图片", colors.line, colors.amber, () -> {
+                LinearLayout.LayoutParams removeParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+                removeParams.setMarginStart(dp(8));
+                pictureRow.addView(action("移除图片", colors.card, colors.amber, () -> {
                     icon.removeImage();
                     update[0].run();
                 }), removeParams);
@@ -892,11 +1081,11 @@ public final class MainActivity extends LedgerActivity {
             changed.run();
         };
 
-        gap(body, 12);
+        gap(body, 16);
         body.addView(pictureRow);
-        body.addView(label("设置图片后显示图片，移除后显示下面的文字图标。", 12, colors.muted, false));
+        hint(body, "设置图片后显示图片，移除后显示下面的文字图标。");
         addField(body, "图标文字（最多 " + Icons.MAX_TEXT + " 个字符）", text);
-        gap(body, 10);
+        gap(body, 12);
         body.addView(label("颜色", 13, colors.muted, true));
         gap(body, 6);
         body.addView(swatches);
@@ -921,24 +1110,22 @@ public final class MainActivity extends LedgerActivity {
             public void afterTextChanged(Editable value) { }
         });
         update[0].run();
-
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(body);
-        new AlertDialog.Builder(this).setTitle("图标").setView(scroll)
-                .setPositiveButton("完成", null)
-                .setNeutralButton("恢复默认", (dialog, button) -> {
-                    icon.text = null;
-                    icon.color = null;
-                    icon.removeImage();
-                    changed.run();
-                }).show();
+        sheet.leading("恢复默认", () -> {
+            icon.text = null;
+            icon.color = null;
+            icon.removeImage();
+            changed.run();
+            sheet.dismiss();
+        });
+        sheet.trailing("完成", () -> true);
+        sheet.show();
     }
 
     private interface ColorSelection {
         void select(Integer color);
     }
 
-    /** Colour circles in rows of six, starting with "自动"; the selected one is outlined. */
+    /** Colour tiles in rows of six, starting with "自动"; the selected one is outlined. */
     private void renderSwatches(LinearLayout grid, IconChoice icon, ColorSelection selection) {
         grid.removeAllViews();
         int perRow = 6;
@@ -947,14 +1134,12 @@ public final class MainActivity extends LedgerActivity {
         for (int i = -1; i < Icons.SWATCHES.length; i++) {
             if ((i + 1) % perRow == 0) {
                 line = row();
-                grid.addView(line, new LinearLayout.LayoutParams(-1, dp(44)));
+                grid.addView(line, new LinearLayout.LayoutParams(-1, dp(48)));
             }
             Integer color = i < 0 ? null : Integer.valueOf(Icons.SWATCHES[i]);
             boolean selected = color == null ? icon.color == null : color.equals(icon.color);
-            GradientDrawable dot = new GradientDrawable();
-            dot.setShape(GradientDrawable.OVAL);
-            dot.setColor(color == null ? colors.card : 0xFF000000 | color);
-            dot.setStroke(selected ? dp(3) : dp(1), selected ? colors.green : colors.line);
+            Squircle dot = new Squircle(color == null ? colors.card : 0xFF000000 | color, dp(12))
+                    .stroke(selected ? colors.green : colors.line, selected ? dp(3) : dp(1));
             TextView swatch = new TextView(this);
             swatch.setBackground(dot);
             swatch.setGravity(Gravity.CENTER);
@@ -964,13 +1149,14 @@ public final class MainActivity extends LedgerActivity {
                 swatch.setTextColor(colors.ink);
             }
             swatch.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            // Equal cells keep six circles per row on narrow dialogs; the whole cell is the tap target.
+            // Equal cells keep six tiles per row on narrow sheets; the whole cell is the tap target.
             LinearLayout cell = row();
             cell.setGravity(Gravity.CENTER);
             cell.setContentDescription((color == null ? "自动颜色" : Icons.formatColor(color))
                     + (selected ? "，已选择" : ""));
             cell.setOnClickListener(view -> selection.select(color));
-            cell.addView(swatch, new LinearLayout.LayoutParams(dp(36), dp(36)));
+            Motion.pressable(cell, 0.9f);
+            cell.addView(swatch, new LinearLayout.LayoutParams(dp(38), dp(38)));
             line.addView(cell, new LinearLayout.LayoutParams(0, -1, 1f));
         }
         for (int i = total % perRow; i > 0 && i < perRow; i++) {
@@ -1030,12 +1216,20 @@ public final class MainActivity extends LedgerActivity {
     }
 
     private void confirmDelete(Subscription entry) {
-        new AlertDialog.Builder(this).setTitle("删除订阅")
+        confirmDelete(entry, null);
+    }
+
+    /** Asks before deleting; {@code editor} is the open editor sheet to close afterwards, or null. */
+    private void confirmDelete(Subscription entry, Sheet editor) {
+        alert().setTitle("删除订阅")
                 .setMessage("确定删除“" + entry.title + "”？订阅的附件会一并删除，已有的扣款记录会保留。")
                 .setNegativeButton("取消", null)
                 .setPositiveButton("删除", (dialog, button) -> {
                     RenewalReminder.clearReceipt(this, entry.id);
                     if (commit(() -> ledgerStore().load().removeSubscription(entry.id))) {
+                        if (editor != null) {
+                            editor.dismiss();
+                        }
                         render();
                     }
                 }).show();
@@ -1055,12 +1249,23 @@ public final class MainActivity extends LedgerActivity {
     }
 
     private void settings() {
-        String notificationAction = RenewalReminder.enabled(this) ? "管理系统通知" : "开启续费提醒";
-        String[] actions = {notificationAction, "余额账户", "扣款记录", "支出统计与汇率",
-                "按月导出账单与发票", "导出备份（含附件）", "从备份合并", "使用 Claude 模板"};
-        Runnable[] handlers = {
-                () -> startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                        .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName())),
+        List<String> items = new ArrayList<>();
+        List<Runnable> handlers = new ArrayList<>();
+        items.add(RenewalReminder.enabled(this) ? "管理系统通知" : "开启续费提醒");
+        handlers.add(() -> startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName())));
+        if (Palette.dynamicAvailable()) {
+            boolean dynamic = Palette.dynamicEnabled(this);
+            items.add(dynamic ? "配色：跟随壁纸（点按改用应用绿色）" : "配色：应用绿色（点按改为跟随壁纸）");
+            handlers.add(() -> {
+                Palette.setDynamic(this, !dynamic);
+                RenewalReminder.refresh(this);
+                recreate();
+            });
+        }
+        String[] rest = {"余额账户", "扣款记录", "支出统计与汇率", "按月导出账单与发票", "导出备份（含附件）",
+                "从备份合并", "使用 Claude 模板"};
+        Runnable[] restHandlers = {
                 () -> open(WalletsActivity.class),
                 () -> open(HistoryActivity.class),
                 () -> open(StatsActivity.class),
@@ -1072,9 +1277,9 @@ public final class MainActivity extends LedgerActivity {
                         .addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), OPEN_BACKUP),
                 () -> editor(null, true),
         };
-        new AlertDialog.Builder(this).setTitle("设置")
-                .setItems(actions, (dialog, selected) -> handlers[selected].run())
-                .setNegativeButton("关闭", null).show();
+        java.util.Collections.addAll(items, rest);
+        java.util.Collections.addAll(handlers, restHandlers);
+        menu("设置", items.toArray(new String[0]), handlers.toArray(new Runnable[0]), -1);
     }
 
     @Override
@@ -1164,7 +1369,7 @@ public final class MainActivity extends LedgerActivity {
         if (!imported.attachments.isEmpty()) {
             counts += "、" + imported.attachments.size() + " 个附件";
         }
-        new AlertDialog.Builder(this).setTitle("合并备份")
+        alert().setTitle("合并备份")
                 .setMessage("备份中有 " + counts + "。同一条记录将以备份中的内容为准。")
                 .setNegativeButton("取消", null)
                 .setPositiveButton("合并", (dialog, button) -> {

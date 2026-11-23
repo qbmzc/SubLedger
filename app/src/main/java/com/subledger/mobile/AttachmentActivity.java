@@ -29,25 +29,25 @@ public final class AttachmentActivity extends LedgerActivity {
             finish();
             return;
         }
-        LinearLayout root = screen("附件", null);
+        LinearLayout root = screen("附件", null, 960);
         root.addView(label(attachment.name, 16, colors.ink, true));
         gap(root, 2);
         root.addView(label(attachment.added + " 添加 · " + size(attachment.size)
                 + (attachment.isPdf() ? " · PDF" : "") + " · " + ownerName(ledger, attachment), 12, colors.muted, false));
-        gap(root, 10);
+        gap(root, 12);
         LinearLayout actions = row();
         if (!moveTargets(ledger, attachment).isEmpty()) {
-            actions.addView(action("移到其他账期…", colors.line, colors.green,
-                    () -> moveAttachment(attachment, this::render)), new LinearLayout.LayoutParams(0, dp(46), 1f));
+            actions.addView(action("移到其他账期…", colors.card, colors.green,
+                    () -> moveAttachment(attachment, this::render)), new LinearLayout.LayoutParams(0, dp(48), 1f));
         }
-        LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        deleteParams.leftMargin = actions.getChildCount() > 0 ? dp(8) : 0;
-        actions.addView(action("删除", colors.line, colors.amber,
+        LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        deleteParams.setMarginStart(actions.getChildCount() > 0 ? dp(8) : 0);
+        actions.addView(action("删除", colors.card, colors.amber,
                 () -> deleteAttachment(attachment, this::finish)), deleteParams);
         root.addView(actions);
-        gap(root, 12);
+        gap(root, 14);
         File file = AttachmentStore.file(this, attachment);
-        int width = getResources().getDisplayMetrics().widthPixels - dp(40);
+        int width = dp(contentWidthDp(960));
         if (!file.isFile()) {
             root.addView(label("文件缺失。可能是从不含附件的 JSON 备份导入的。", 14, colors.muted, false));
         } else if (attachment.isPdf()) {
@@ -71,6 +71,7 @@ public final class AttachmentActivity extends LedgerActivity {
                 try (PdfRenderer.Page page = renderer.openPage(i)) {
                     int height = Math.max(1, Math.round(pageWidth * page.getHeight() / (float) page.getWidth()));
                     Bitmap bitmap = Bitmap.createBitmap(pageWidth, height, Bitmap.Config.ARGB_8888);
+                    // The page's own paper, not a UI colour: PDFs assume a white page.
                     bitmap.eraseColor(Color.WHITE);
                     page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
                     if (i > 0) {
@@ -94,7 +95,7 @@ public final class AttachmentActivity extends LedgerActivity {
         image.setImageBitmap(bitmap);
         image.setAdjustViewBounds(true);
         image.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        image.setBackground(shape(colors.card, 12));
+        image.setBackground(shape(colors.card, 20));
         image.setClipToOutline(true);
         return image;
     }

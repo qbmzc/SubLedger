@@ -1,7 +1,5 @@
 package com.subledger.mobile;
 
-import android.app.AlertDialog;
-import android.graphics.Color;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
@@ -9,7 +7,6 @@ import android.view.View;
 import android.widget.AdapterView;
 import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 
@@ -51,8 +48,11 @@ public final class HistoryActivity extends LedgerActivity {
         ledger = ledgerStore().load();
         rates = rateStore().load();
         attachmentCounts = ledger.attachmentCounts();
-        LinearLayout root = screen("扣款记录",
-                action("＋ 补记", colors.hero, Color.WHITE, this::addPayment));
+        TextView backfill = action("补记", colors.hero, colors.onHero, this::addPayment);
+        backfill.setBackground(ripple(colors.hero, 22));
+        backfill.setCompoundDrawablesRelativeWithIntrinsicBounds(new Glyph(Glyph.PLUS, colors.onHero, dp(18)), null, null, null);
+        backfill.setCompoundDrawablePadding(dp(4));
+        LinearLayout root = screen("扣款记录", backfill, 760);
 
         List<Payment> visible = new ArrayList<>();
         for (Payment payment : ledger.payments) {
@@ -65,15 +65,19 @@ public final class HistoryActivity extends LedgerActivity {
         if (filterName != null) {
             LinearLayout filterRow = row();
             filterRow.setGravity(Gravity.CENTER_VERTICAL);
+            filterRow.setBackground(shape(colors.lime, 18));
+            filterRow.setPadding(dp(16), dp(6), dp(6), dp(6));
             filterRow.addView(label("只看：" + filterName, 14, colors.ink, true),
                     new LinearLayout.LayoutParams(0, -2, 1f));
-            filterRow.addView(action("查看全部", colors.line, colors.green, () -> {
+            TextView all = action("查看全部", colors.card, colors.green, () -> {
                 subscriptionFilter = null;
                 walletFilter = null;
                 render();
-            }), new LinearLayout.LayoutParams(-2, dp(40)));
+            });
+            all.setPadding(dp(14), 0, dp(14), 0);
+            filterRow.addView(all, new LinearLayout.LayoutParams(-2, dp(40)));
             root.addView(filterRow);
-            gap(root, 10);
+            gap(root, 12);
         }
 
         BigDecimal thisYear = BigDecimal.ZERO;
@@ -91,11 +95,11 @@ public final class HistoryActivity extends LedgerActivity {
             }
         }
         LinearLayout hero = column();
-        hero.setBackground(shape(colors.hero, 24));
-        hero.setPadding(dp(20), dp(16), dp(20), dp(16));
+        hero.setBackground(shape(colors.hero, 28));
+        hero.setPadding(dp(22), dp(18), dp(22), dp(18));
         hero.addView(label(today.getYear() + " 年已支出", 14, colors.heroText, true));
         gap(hero, 4);
-        hero.addView(label(money(rates.base, thisYear), 26, Color.WHITE, true));
+        hero.addView(amount(money(rates.base, thisYear), 30, colors.onHero));
         gap(hero, 8);
         String footer = "全部 " + visible.size() + " 笔 · 合计 " + money(rates.base, all) + " · 只计你承担的部分";
         if (unconverted > 0) {
@@ -106,7 +110,7 @@ public final class HistoryActivity extends LedgerActivity {
 
         if (visible.isEmpty()) {
             gap(root, 12);
-            LinearLayout empty = panel(colors.card, 18);
+            LinearLayout empty = panel(colors.card, 24);
             empty.addView(label("还没有扣款记录", 16, colors.ink, true));
             gap(empty, 4);
             empty.addView(label("自动续费到期时会自动记录；手动续费点「记录已续费」时记录。"
@@ -125,12 +129,10 @@ public final class HistoryActivity extends LedgerActivity {
                 month = current;
                 monthHeader(root, current, current.getYear() + " 年 " + current.getMonthValue() + " 月 · "
                         + money(rates.base, monthTotal(visible, current)));
-                group = panel(colors.card, 18);
+                group = group();
                 root.addView(group);
-            } else {
-                gap(group, 12);
             }
-            group.addView(paymentRow(payment), new LinearLayout.LayoutParams(-1, -2));
+            addRow(group, paymentRow(payment));
         }
         if (count < visible.size()) {
             gap(root, 12);
@@ -143,13 +145,14 @@ public final class HistoryActivity extends LedgerActivity {
 
     /** Month title with an export button for that month's statement and invoices. */
     private void monthHeader(LinearLayout root, YearMonth month, String title) {
-        gap(root, 18);
+        gap(root, 22);
         LinearLayout header = row();
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.addView(label(title, 18, colors.ink, true), new LinearLayout.LayoutParams(0, -2, 1f));
-        TextView export = action("导出", colors.line, colors.green, () -> exportMonth(month));
+        header.addView(heading(label(title, 17, colors.ink, true)), new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView export = action("导出", colors.card, colors.green, () -> exportMonth(month));
+        export.setBackground(ripple(colors.card, 20));
         export.setContentDescription("导出 " + month.getYear() + " 年 " + month.getMonthValue() + " 月账单与发票");
-        header.addView(export, new LinearLayout.LayoutParams(dp(64), dp(40)));
+        header.addView(export, new LinearLayout.LayoutParams(dp(68), dp(38)));
         root.addView(header);
         gap(root, 8);
     }
@@ -188,20 +191,21 @@ public final class HistoryActivity extends LedgerActivity {
     private View paymentRow(Payment payment) {
         LinearLayout container = row();
         container.setGravity(Gravity.CENTER_VERTICAL);
-        container.setBackground(ripple(colors.card, 12));
+        container.setPadding(dp(16), dp(12), dp(16), dp(12));
+        container.setBackground(ripple(android.graphics.Color.TRANSPARENT, 0));
         container.setFocusable(true);
         container.setOnClickListener(view -> details(payment));
-        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(32), dp(32));
-        iconParams.rightMargin = dp(12);
-        container.addView(iconView(ledger.subscription(payment.subscriptionId), payment.title, 32), iconParams);
+        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(38), dp(38));
+        iconParams.setMarginEnd(dp(12));
+        container.addView(iconView(ledger.subscription(payment.subscriptionId), payment.title, 38), iconParams);
         LinearLayout item = column();
         container.addView(item, new LinearLayout.LayoutParams(0, -2, 1f));
         LinearLayout top = row();
         String day = String.format(Locale.ROOT, "%02d-%02d", payment.date.getMonthValue(), payment.date.getDayOfMonth());
         top.addView(label(day + "  " + payment.title, 15, colors.ink, true), new LinearLayout.LayoutParams(0, -2, 1f));
         BigDecimal mine = payment.mine(rates);
-        top.addView(label(mine == null ? money(payment.costCurrency, payment.cost) : money(rates.base, mine),
-                15, colors.green, true));
+        top.addView(amount(mine == null ? money(payment.costCurrency, payment.cost) : money(rates.base, mine),
+                15, colors.green));
         item.addView(top);
         List<String> parts = new ArrayList<>();
         parts.add("账单 " + money(payment.currency, payment.amount));
@@ -231,51 +235,60 @@ public final class HistoryActivity extends LedgerActivity {
 
     /** Payment details with its receipts; deleting is offered from here. */
     private void details(Payment payment) {
-        StringBuilder text = new StringBuilder();
-        text.append(payment.date).append(payment.auto ? " · 自动记录" : " · 手动记录");
-        text.append("\n账单 ").append(money(payment.currency, payment.amount));
-        text.append("\n实际成本 ").append(money(payment.costCurrency, payment.cost));
+        Sheet sheet = sheet(payment.title).detents(0.6f, 1f);
+        LinearLayout body = sheet.body;
+        LinearLayout top = row();
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(52), dp(52));
+        iconParams.setMarginEnd(dp(14));
+        top.addView(iconView(ledger.subscription(payment.subscriptionId), payment.title, 52), iconParams);
+        LinearLayout titles = column();
+        titles.addView(amount(money(payment.currency, payment.amount), 24, colors.ink));
+        titles.addView(label(payment.date + (payment.auto ? " · 自动记录" : " · 手动记录"), 13, colors.muted, false));
+        top.addView(titles, new LinearLayout.LayoutParams(0, -2, 1f));
+        body.addView(top);
+        gap(body, 14);
+        LinearLayout facts = group();
+        String cost = money(payment.costCurrency, payment.cost);
         if (payment.splitWays > 1) {
-            text.append("（").append(payment.splitWays).append(" 人分摊）");
+            cost += "（" + payment.splitWays + " 人分摊）";
         }
+        addRow(facts, factRow("实际成本", cost, colors.ink));
         BigDecimal mine = payment.mine(rates);
         if (mine != null) {
-            text.append("\n计入支出 ").append(money(rates.base, mine));
+            addRow(facts, factRow("计入支出", money(rates.base, mine), colors.green));
         }
         if (payment.walletId != null) {
             Wallet wallet = ledger.wallet(payment.walletId);
-            text.append("\n").append(wallet == null ? "从已删除的余额账户扣除" : "从「" + wallet.name + "」扣除");
+            addRow(facts, factRow("扣款账户", wallet == null ? "已删除的余额账户" : wallet.name, colors.ink));
         }
-        LinearLayout body = column();
-        body.setPadding(dp(24), dp(8), dp(24), dp(4));
-        body.addView(label(text.toString(), 15, colors.ink, false));
-        gap(body, 14);
-        body.addView(label("收据与截图", 13, colors.muted, true));
-        gap(body, 6);
+        body.addView(facts);
+        section(body, "收据与截图");
         body.addView(new AttachmentStrip(payment.id), new LinearLayout.LayoutParams(-1, -2));
-        new AlertDialog.Builder(this).setTitle(payment.title).setView(body)
-                .setPositiveButton("关闭", null)
-                .setNeutralButton("删除", (dialog, button) -> confirmDelete(payment))
-                .show();
+        gap(body, 24);
+        body.addView(action("删除扣款记录", colors.card, colors.amber, () -> confirmDelete(payment, sheet)),
+                new LinearLayout.LayoutParams(-1, dp(50)));
+        sheet.show();
     }
 
-    private void confirmDelete(Payment payment) {
+    private void confirmDelete(Payment payment, Sheet details) {
         Wallet wallet = payment.walletId == null ? null : ledger.wallet(payment.walletId);
-        AlertDialog.Builder dialog = new AlertDialog.Builder(this).setTitle("删除扣款记录")
+        android.app.AlertDialog.Builder dialog = alert().setTitle("删除扣款记录")
                 .setMessage(payment.date + " " + payment.title + " " + money(payment.currency, payment.amount)
                         + (attachmentCounts.containsKey(payment.id) ? "\n附件会一并删除。" : ""))
                 .setNegativeButton("取消", null);
         if (wallet != null) {
-            dialog.setPositiveButton("删除并退回余额", (d, b) -> delete(payment, true))
-                    .setNeutralButton("仅删除", (d, b) -> delete(payment, false));
+            dialog.setPositiveButton("删除并退回余额", (d, b) -> delete(payment, true, details))
+                    .setNeutralButton("仅删除", (d, b) -> delete(payment, false, details));
         } else {
-            dialog.setPositiveButton("删除", (d, b) -> delete(payment, false));
+            dialog.setPositiveButton("删除", (d, b) -> delete(payment, false, details));
         }
         dialog.show();
     }
 
-    private void delete(Payment payment, boolean refund) {
+    private void delete(Payment payment, boolean refund, Sheet details) {
         if (commit(() -> ledgerStore().load().removePayment(payment.id, refund))) {
+            details.dismiss();
             render();
         }
     }
@@ -295,14 +308,12 @@ public final class HistoryActivity extends LedgerActivity {
                 selected = i;
             }
         }
-        LinearLayout fields = column();
-        fields.setPadding(dp(22), dp(8), dp(22), dp(14));
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(fields);
+        Sheet sheet = sheet("补记扣款").detents(0.62f, 1f).expanded();
+        LinearLayout fields = sheet.body;
         Spinner subscription = options(names, selected);
         addField(fields, "订阅", subscription);
         LocalDate[] date = {LocalDate.now()};
-        TextView dateButton = action(date[0].toString(), colors.paper, colors.green, null);
+        TextView dateButton = pickerField(date[0].toString());
         dateButton.setOnClickListener(view -> chooseDate(date[0], picked -> {
             date[0] = picked;
             dateButton.setText(picked.toString());
@@ -312,6 +323,7 @@ public final class HistoryActivity extends LedgerActivity {
                 InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL, 20);
         addField(fields, "账单金额", amount);
         TextView billCurrency = label("", 12, colors.muted, false);
+        billCurrency.setPadding(dp(4), dp(4), dp(4), 0);
         fields.addView(billCurrency);
         LinearLayout costRow = row();
         EditText cost = input("留空则自动计算", "",
@@ -319,11 +331,11 @@ public final class HistoryActivity extends LedgerActivity {
         costRow.addView(cost, new LinearLayout.LayoutParams(0, -2, 1f));
         EditText costCode = input("币种", rates.base,
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS, 3);
-        LinearLayout.LayoutParams codeParams = new LinearLayout.LayoutParams(dp(84), -2);
-        codeParams.leftMargin = dp(8);
+        LinearLayout.LayoutParams codeParams = new LinearLayout.LayoutParams(dp(96), -2);
+        codeParams.setMarginStart(dp(8));
         costRow.addView(costCode, codeParams);
         addField(fields, "实际花费（选填）", costRow);
-        fields.addView(label("补记不会改动余额账户。留空时按订阅的实际成本或当前汇率计算。", 12, colors.muted, false));
+        hint(fields, "补记不会改动余额账户。留空时按订阅的实际成本或当前汇率计算。");
         subscription.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
@@ -335,15 +347,13 @@ public final class HistoryActivity extends LedgerActivity {
             public void onNothingSelected(AdapterView<?> parent) { }
         });
 
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("补记扣款")
-                .setView(scroll).setNegativeButton("取消", null).setPositiveButton("保存", null).create();
-        dialog.show();
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+        sheet.leading("取消", sheet::cancel);
+        sheet.trailing("保存", () -> {
             Subscription entry = choices.get(subscription.getSelectedItemPosition());
             BigDecimal bill = parseAmount(fieldValue(amount));
             if (bill == null) {
                 amount.setError("请输入有效金额");
-                return;
+                return false;
             }
             Payment payment;
             try {
@@ -360,19 +370,21 @@ public final class HistoryActivity extends LedgerActivity {
                     costCurrency = fieldValue(costCode).toUpperCase(Locale.ROOT);
                     if (costValue == null) {
                         cost.setError("请输入有效金额，或留空");
-                        return;
+                        return false;
                     }
                 }
                 payment = new Payment(UUID.randomUUID().toString(), entry.id, entry.title, date[0],
                         bill, entry.currency, costValue, costCurrency, entry.splitWays, null, false);
             } catch (IllegalArgumentException ex) {
                 toast("请检查金额的小数位和币种");
-                return;
+                return false;
             }
-            if (commit(() -> ledgerStore().load().addPayment(payment))) {
-                dialog.dismiss();
-                render();
+            if (!commit(() -> ledgerStore().load().addPayment(payment))) {
+                return false;
             }
+            render();
+            return true;
         });
+        sheet.show();
     }
 }

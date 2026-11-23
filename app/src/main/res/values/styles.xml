@@ -2,13 +2,31 @@
     <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans-serif</item>
         <item name="android:colorAccent">#335C45</item>
-        <item name="android:statusBarColor">#F5F5EE</item>
-        <item name="android:navigationBarColor">#F5F5EE</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">#F3F4EC</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar">true</item>
-        <item name="android:windowBackground">#F5F5EE</item>
+        <item name="android:windowBackground">@color/app_background</item>
         <item name="android:forceDarkAllowed">false</item>
     </style>
+
+    <!-- Applied over AppTheme on Android 12+ when wallpaper colours are turned off in settings. -->
+    <style name="BrandColors">
+        <item name="android:colorAccent">#335C45</item>
+        <item name="android:windowBackground">@color/app_background</item>
+    </style>
+
+    <!-- Window of a bottom sheet (Sheet.java): full screen and transparent; the sheet draws its own scrim. -->
+    <style name="SheetOverlay">
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+
     <style name="WidgetLine">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>

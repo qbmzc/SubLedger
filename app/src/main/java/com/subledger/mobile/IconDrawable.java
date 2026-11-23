@@ -7,14 +7,21 @@ import android.graphics.Canvas;
 import android.graphics.ColorFilter;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 
-/** Round subscription icon: the picked picture, or a text badge from {@link Icons}. */
+/**
+ * Subscription icon as a continuous-corner tile, like an app icon: the picked picture, or a text
+ * badge from {@link Icons}.
+ */
 final class IconDrawable extends Drawable {
+    /** Corner radius as a share of the side. */
+    private static final float CORNER = 0.27f;
     private final Icons.Badge badge;
     private final Bitmap picture;
     private final int size;
@@ -22,6 +29,8 @@ final class IconDrawable extends Drawable {
     private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint image = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private final Path tile = new Path();
+    private final Path outline = new Path();
 
     /**
      * @param picture icon picture, or null for the badge
@@ -52,8 +61,19 @@ final class IconDrawable extends Drawable {
 
     @Override
     protected void onBoundsChange(Rect bounds) {
+        float side = Math.min(bounds.width(), bounds.height());
+        RectF square = new RectF(bounds.exactCenterX() - side / 2, bounds.exactCenterY() - side / 2,
+                bounds.exactCenterX() + side / 2, bounds.exactCenterY() + side / 2);
+        float radius = side * CORNER;
+        tile.reset();
+        Squircle.addTo(tile, square, new float[]{radius, radius, radius, radius}, Squircle.SMOOTHING);
+        float inset = ring.getStrokeWidth() / 2;
+        square.inset(inset, inset);
+        float inner = Math.max(0, radius - inset);
+        outline.reset();
+        Squircle.addTo(outline, square, new float[]{inner, inner, inner, inner}, Squircle.SMOOTHING);
         if (picture != null) {
-            // Centre-crop the picture to the circle.
+            // Centre-crop the picture to the tile.
             float scale = Math.min(bounds.width(), bounds.height()) / (float) Math.min(picture.getWidth(), picture.getHeight());
             Matrix matrix = new Matrix();
             matrix.setScale(scale, scale);
@@ -66,25 +86,24 @@ final class IconDrawable extends Drawable {
     @Override
     public void draw(Canvas canvas) {
         Rect bounds = getBounds();
-        float radius = Math.min(bounds.width(), bounds.height()) / 2f;
+        float side = Math.min(bounds.width(), bounds.height());
         float cx = bounds.exactCenterX();
         float cy = bounds.exactCenterY();
         if (picture != null) {
-            canvas.drawCircle(cx, cy, radius, image);
+            canvas.drawPath(tile, image);
         } else {
-            canvas.drawCircle(cx, cy, radius, fill);
-            // Start at about 40% of the diameter and shrink until the text fits inside the circle.
-            float textSize = radius * 0.84f;
+            canvas.drawPath(tile, fill);
+            // Start at about 42% of the side and shrink until the text fits inside the tile.
+            float textSize = side * 0.42f;
             text.setTextSize(textSize);
-            while (textSize > 6 && text.measureText(badge.text) > radius * 1.5f) {
+            while (textSize > 6 && text.measureText(badge.text) > side * 0.74f) {
                 textSize *= 0.9f;
                 text.setTextSize(textSize);
             }
             Paint.FontMetrics metrics = text.getFontMetrics();
             canvas.drawText(badge.text, cx, cy - (metrics.ascent + metrics.descent) / 2, text);
         }
-        float inset = ring.getStrokeWidth() / 2;
-        canvas.drawCircle(cx, cy, radius - inset, ring);
+        canvas.drawPath(outline, ring);
     }
 
     @Override

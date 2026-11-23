@@ -2,7 +2,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <application android:label="订阅账本" android:icon="@drawable/ic_ledger"
+    <application android:label="订阅账本" android:icon="@mipmap/ic_launcher"
         android:theme="@style/AppTheme" android:allowBackup="false"
         android:supportsRtl="true">
         <activity android:name=".MainActivity" android:exported="true">

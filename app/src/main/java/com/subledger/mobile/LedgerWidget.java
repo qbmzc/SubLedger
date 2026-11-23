@@ -61,7 +61,8 @@ public final class LedgerWidget extends AppWidgetProvider {
         }
         views.setTextViewText(R.id.widget_empty, "近期没有续费");
         views.setViewVisibility(R.id.widget_empty, upcoming.isEmpty() ? View.VISIBLE : View.GONE);
-        views.setOnClickPendingIntent(R.id.widget_root, PendingIntent.getActivity(context, 1,
+        // android.R.id.background lets Android 12+ launchers animate the open and round the widget.
+        views.setOnClickPendingIntent(android.R.id.background, PendingIntent.getActivity(context, 1,
                 new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
         manager.updateAppWidget(ids, views);
