@@ -11,7 +11,7 @@ import android.util.LayoutDirection;
 
 /** Small line icons drawn in code on a 24-unit grid, so they take any palette colour. */
 final class Glyph extends Drawable {
-    static final int BACK = 0, CLOSE = 1, DOWN = 2, FORWARD = 3, PLUS = 4;
+    static final int BACK = 0, CLOSE = 1, DOWN = 2, FORWARD = 3, PLUS = 4, CHECK = 5;
 
     private final int kind;
     private final int size;
@@ -53,6 +53,9 @@ final class Glyph extends Drawable {
             case CLOSE:
                 line(7, 7, 17, 17);
                 line(17, 7, 7, 17);
+                break;
+            case CHECK:
+                line(5, 12.5f, 10, 17.5f, 19, 7);
                 break;
             default:
                 line(12, 5, 12, 19);

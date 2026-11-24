@@ -3,6 +3,7 @@ package com.subledger.mobile;
 import android.Manifest;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.drawable.InsetDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
@@ -1147,6 +1148,10 @@ public final class MainActivity extends LedgerActivity {
                 swatch.setText("自动");
                 swatch.setTextSize(11);
                 swatch.setTextColor(colors.ink);
+            } else if (selected) {
+                // The ring alone vanishes on swatches close to the accent; the check always reads.
+                int mark = 0xFF000000 | new Icons.Badge("", color).textColor();
+                swatch.setForeground(new InsetDrawable(new Glyph(Glyph.CHECK, mark, dp(20)), dp(9)));
             }
             swatch.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             // Equal cells keep six tiles per row on narrow sheets; the whole cell is the tap target.

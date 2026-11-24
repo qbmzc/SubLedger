@@ -41,6 +41,10 @@ final class Segmented extends FrameLayout {
         thumb.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
         addView(thumb, new LayoutParams(0, LayoutParams.MATCH_PARENT));
         segments = new LinearLayout(context);
+        // A ViewGroup draws its children in Z order, so the elevated thumb would cover the
+        // labels; lift the labels above it (no outline, so they cast no shadow).
+        segments.setOutlineProvider(null);
+        segments.setTranslationZ(dp(2));
         addView(segments, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
         for (int i = 0; i < items.length; i++) {
             final int index = i;
