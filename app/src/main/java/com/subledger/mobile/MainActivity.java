@@ -1,9 +1,13 @@
 package com.subledger.mobile;
 
 import android.Manifest;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.drawable.ClipDrawable;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.InsetDrawable;
+import android.graphics.drawable.LayerDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
@@ -18,6 +22,7 @@ import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.Spinner;
 import android.widget.TextView;
 
@@ -90,6 +95,17 @@ public final class MainActivity extends LedgerActivity {
         }
         refreshRatesIfStale(ledger, this::renderSummary);
         RenewalReminder.refresh(this);
+        checkForUpdate(false);
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && pendingUpdate != null) {
+            Updater.Release release = pendingUpdate;
+            pendingUpdate = null;
+            showUpdate(release);
+        }
     }
 
     @Override
@@ -1268,6 +1284,14 @@ public final class MainActivity extends LedgerActivity {
                 recreate();
             });
         }
+        items.add("检查更新（当前版本 " + Updater.installedVersion(this) + "）");
+        handlers.add(() -> checkForUpdate(true));
+        boolean auto = Updater.autoEnabled(this);
+        items.add(auto ? "自动检查更新：开（点按关闭）" : "自动检查更新：关（点按开启）");
+        handlers.add(() -> {
+            Updater.setAuto(this, !auto);
+            toast(auto ? "已关闭自动检查更新" : "已开启自动检查更新，每天最多检查一次");
+        });
         String[] rest = {"余额账户", "扣款记录", "支出统计与汇率", "按月导出账单与发票", "导出备份（含附件）",
                 "从备份合并", "使用 Claude 模板"};
         Runnable[] restHandlers = {
@@ -1285,6 +1309,187 @@ public final class MainActivity extends LedgerActivity {
         java.util.Collections.addAll(items, rest);
         java.util.Collections.addAll(handlers, restHandlers);
         menu("设置", items.toArray(new String[0]), handlers.toArray(new Runnable[0]), -1);
+    }
+
+    // --- Updates ----------------------------------------------------------------------------
+
+    /** A release found while a sheet or dialog had focus; shown once the list is in front again. */
+    private Updater.Release pendingUpdate;
+
+    /** Looks for a newer release: at most daily and quietly from onResume, or on demand. */
+    private void checkForUpdate(boolean manual) {
+        if (!manual && !Updater.due(this)) {
+            return;
+        }
+        if (manual) {
+            toast("正在检查更新…");
+        }
+        if (!Updater.begin()) {
+            return;
+        }
+        Context app = getApplicationContext();
+        new Thread(() -> {
+            Updater.Release release = null;
+            String error = null;
+            try {
+                release = Updater.latest();
+                Updater.markChecked(app);
+            } catch (IOException ex) {
+                error = networkError(ex);
+            } finally {
+                Updater.done();
+            }
+            Updater.Release found = release;
+            String failure = error;
+            runOnUiThread(() -> updateChecked(found, failure, manual));
+        }).start();
+    }
+
+    private void updateChecked(Updater.Release release, String error, boolean manual) {
+        if (isFinishing() || isDestroyed()) {
+            return;
+        }
+        if (error != null) {
+            if (manual) {
+                toast("检查更新失败：" + error);
+            }
+            return;
+        }
+        String current = Updater.installedVersion(this);
+        if (release == null || !Updater.newer(release.version, current)) {
+            if (manual) {
+                toast("已是最新版本 " + current);
+            }
+            return;
+        }
+        if (!manual && release.tag.equals(Updater.skipped(this))) {
+            return;
+        }
+        // Wait for open sheets and dialogs to close rather than stacking on top of them.
+        if (hasWindowFocus()) {
+            showUpdate(release);
+        } else {
+            pendingUpdate = release;
+        }
+    }
+
+    private void showUpdate(Updater.Release release) {
+        Sheet sheet = sheet("软件更新").detents(0.6f, 1f);
+        LinearLayout body = sheet.body;
+        body.addView(heading(label("订阅账本 " + release.version, 24, colors.ink, true)));
+        gap(body, 4);
+        body.addView(label("当前版本 " + Updater.installedVersion(this)
+                + (release.size > 0 ? " · 大小 " + fileSize(release.size) : ""), 14, colors.muted, false));
+        String notes = Updater.plainNotes(release.notes);
+        if (!notes.isEmpty()) {
+            gap(body, 16);
+            LinearLayout card = panel(colors.card, 22);
+            card.addView(label("更新内容", 13, colors.green, true));
+            gap(card, 6);
+            TextView text = label(notes, 15, colors.ink, false);
+            text.setLineSpacing(dp(4), 1f);
+            card.addView(text);
+            body.addView(card);
+        }
+        gap(body, 18);
+        ProgressBar bar = progressBar();
+        bar.setVisibility(View.GONE);
+        LinearLayout.LayoutParams barParams = new LinearLayout.LayoutParams(-1, dp(6));
+        barParams.bottomMargin = dp(14);
+        body.addView(bar, barParams);
+        TextView install = action("下载并安装", colors.hero, colors.onHero, null);
+        install.setOnClickListener(view -> downloadUpdate(release, sheet, install, bar));
+        body.addView(install, new LinearLayout.LayoutParams(-1, dp(52)));
+        gap(body, 10);
+        body.addView(action("跳过这个版本", colors.card, colors.green, () -> {
+            Updater.skip(this, release.tag);
+            sheet.dismiss();
+        }), new LinearLayout.LayoutParams(-1, dp(52)));
+        gap(body, 8);
+        body.addView(label("跳过后不再自动提醒这个版本，仍可在设置里手动检查。安装前 Android 会请你确认。",
+                13, colors.muted, false));
+        sheet.show();
+    }
+
+    private void downloadUpdate(Updater.Release release, Sheet sheet, TextView button, ProgressBar bar) {
+        if (!getPackageManager().canRequestPackageInstalls()) {
+            alert().setTitle("允许安装更新")
+                    .setMessage("需要在系统设置里允许「订阅账本」安装应用。开启后返回这里，再点一次「下载并安装」。")
+                    .setPositiveButton("去设置", (dialog, which) -> startActivity(new Intent(
+                            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            android.net.Uri.parse("package:" + getPackageName()))))
+                    .setNegativeButton("取消", null)
+                    .show();
+            return;
+        }
+        if (!Updater.begin()) {
+            toast("正在检查更新，请稍后再试");
+            return;
+        }
+        button.setEnabled(false);
+        button.setAlpha(0.6f);
+        button.setText("正在下载…");
+        bar.setProgress(0);
+        bar.setVisibility(View.VISIBLE);
+        Context app = getApplicationContext();
+        new Thread(() -> {
+            String error = null;
+            try {
+                Updater.install(app, release, (done, total) -> {
+                    if (total > 0) {
+                        int permille = (int) (done * 1000 / total);
+                        runOnUiThread(() -> bar.setProgress(permille));
+                    }
+                });
+            } catch (IOException ex) {
+                error = networkError(ex);
+            } catch (RuntimeException ex) {
+                // PackageInstaller refused the session (e.g. a SecurityException).
+                error = "无法开始安装";
+            } finally {
+                Updater.done();
+            }
+            String failure = error;
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+                if (failure == null) {
+                    // Android shows its confirm screen next; UpdateStatus reports the outcome.
+                    sheet.dismiss();
+                    return;
+                }
+                button.setEnabled(true);
+                button.setAlpha(1f);
+                button.setText("重试");
+                bar.setVisibility(View.GONE);
+                toast("更新失败：" + failure);
+            });
+        }).start();
+    }
+
+    private ProgressBar progressBar() {
+        ProgressBar bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        bar.setIndeterminate(false);
+        bar.setMax(1000);
+        LayerDrawable track = new LayerDrawable(new Drawable[]{shape(colors.line, 3),
+                new ClipDrawable(shape(colors.green, 3), Gravity.START, ClipDrawable.HORIZONTAL)});
+        track.setId(0, android.R.id.background);
+        track.setId(1, android.R.id.progress);
+        bar.setProgressDrawable(track);
+        return bar;
+    }
+
+    /** Our own IOExceptions carry Chinese messages; the platform's network ones do not. */
+    private static String networkError(IOException ex) {
+        return ex.getClass() == IOException.class && ex.getMessage() != null
+                ? ex.getMessage() : "网络不可用，请稍后再试";
+    }
+
+    private static String fileSize(long bytes) {
+        return bytes < 1024 * 1024
+                ? Math.max(1, Math.round(bytes / 1024.0)) + " KB"
+                : String.format(Locale.ROOT, "%.1f MB", bytes / (1024.0 * 1024.0));
     }
 
     @Override

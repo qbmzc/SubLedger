@@ -15,6 +15,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history and tags, for the release notes.
+          fetch-depth: 0
+
+      - name: Check tag matches versionName
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          # The in-app updater compares the release tag with the installed versionName.
+          name=$(sed -n "s/^ *versionName '\(.*\)'.*/\1/p" app/build.gradle)
+          if [ "v$name" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match versionName '$name' in app/build.gradle"
+            exit 1
+          fi
 
       - uses: actions/setup-java@v4
         with:
@@ -49,4 +62,10 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" "SubscriptionLedger-${{ github.run_number }}.apk" --title "$GITHUB_REF_NAME" --generate-notes
+        run: |
+          # The notes list the commit subjects since the previous tag; the app shows them as
+          # the update's changes.
+          previous=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
+          git log --no-merges --format='- %s' ${previous:+"$previous.."}"$GITHUB_REF_NAME" > notes.md
+          gh release create "$GITHUB_REF_NAME" "SubscriptionLedger-${{ github.run_number }}.apk" \
+            --title "$GITHUB_REF_NAME" --notes-file notes.md

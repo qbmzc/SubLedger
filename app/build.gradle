@@ -17,7 +17,7 @@ android {
         // 100 + the CI run number: the repository moved to qbmzc/SubLedger, whose run numbers
         // restarted at 1, while builds from the old repository reached 11.
         versionCode(100 + ((System.getenv('GITHUB_RUN_NUMBER') ?: '0') as int))
-        versionName '0.4.1'
+        versionName '0.5.0'
     }
 
     signingConfigs {

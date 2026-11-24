@@ -18,7 +18,8 @@
 12. 图标：常见服务（Claude、Codex、ChatGPT、Netflix、Spotify、爱奇艺、哔哩哔哩等）按名称自动显示缩写和品牌色，其余显示名称首字和固定配色。在编辑页点「更换图标」可改文字（最多 8 个字符，也可用 Emoji）和颜色，或从相册选一张图片（裁成正方形保存在本机）。应用不内置也不联网下载任何品牌 Logo。
 13. 桌面小组件「订阅续费」显示每月支出和最近三项续费。
 14. 界面：Material You 设计，跟随系统浅色/深色模式；Android 12 及以上按壁纸取色（应用、小组件和主题图标），可在「设置」改回应用自带的绿色。详情、编辑等面板从底部弹出，可上下拖动在半屏和全屏之间切换，下拉或点空白处关闭（有未保存的修改时会先确认）；长按订阅卡片可快速编辑、记录续费或删除。平板和桌面窗口下自动改为多列，宽屏时首页分为左右两栏。
-15. 可从「设置」打开 Claude 模板。模板预填币种、付款渠道及已知候选日期，保存前需自行确认金额和日期。
+15. 自动更新：应用每天最多检查一次 GitHub 上的最新版本，有新版本时弹出更新说明，点「下载并安装」后由系统确认安装，数据保留。「设置」里可手动检查更新，或关闭自动检查；不想装的版本可以跳过。首次更新需按提示允许本应用安装应用。
+16. 可从「设置」打开 Claude 模板。模板预填币种、付款渠道及已知候选日期，保存前需自行确认金额和日期。
 
 ### 金额怎么折算
 
@@ -28,7 +29,7 @@
 
 ## 数据与隐私
 
-数据保存在设备，订阅和扣款由用户自己维护。应用只在获取汇率时联网，向 ExchangeRate-API（open.er-api.com）请求本位币汇率，不上传订阅内容。
+数据保存在设备，订阅和扣款由用户自己维护。应用只在两种情况下联网：获取汇率时向 ExchangeRate-API（open.er-api.com）请求本位币汇率；检查和下载更新时访问 GitHub（api.github.com 和 github.com 上本项目的 Release）。都不上传订阅内容。
 
 附件保存在应用私有目录，卸载应用会一并删除。
 
@@ -44,6 +45,6 @@
 
 Windows 上运行 `gradlew.bat :app:assembleDebug`。输出路径为 `app/build/outputs/apk/debug/app-debug.apk`。
 
-GitHub Actions（`.github/workflows/build.yml`）在每次推送到 `main` 时构建 APK 并作为 Artifact 上传；推送 `v*` 标签时另外发布 Release 附带 APK。CI 构建使用仓库 Secrets（`SIGNING_KEYSTORE_BASE64`、`SIGNING_ALIAS`、`SIGNING_PASSWORD`）中的固定签名密钥，因此新版本可直接覆盖安装；本地构建仍使用 Android 调试密钥，与 CI 版本不能互相覆盖安装。
+GitHub Actions（`.github/workflows/build.yml`）在每次推送到 `main` 时构建 APK 并作为 Artifact 上传；推送 `v*` 标签时另外发布 Release 附带 APK，标签必须等于 `v` 加 `app/build.gradle` 里的 `versionName`，更新说明取自上一个标签以来的提交标题。应用内更新读取的就是这里的最新 Release。CI 构建使用仓库 Secrets（`SIGNING_KEYSTORE_BASE64`、`SIGNING_ALIAS`、`SIGNING_PASSWORD`）中的固定签名密钥，因此新版本可直接覆盖安装；本地构建仍使用 Android 调试密钥，与 CI 版本不能互相覆盖安装。
 
 单独提供的体验 APK 使用测试签名。若改用自己构建的版本，先在「设置」中导出备份（ZIP，含附件），再卸载旧版、安装新版并导入备份。日后为同一安装包制作更新时，请保管并持续使用同一签名密钥。
