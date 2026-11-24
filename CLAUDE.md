@@ -15,7 +15,7 @@ Requires the Android 35 SDK and JDK 17+.
 ./gradlew :app:lint              # Android lint (default config, no custom rules)
 ```
 
-CI: `.github/workflows/build.yml` runs `assembleDebug` on pushes to `main` (APK uploaded as an artifact) and publishes a GitHub Release for `v*` tags. When `SIGNING_KEYSTORE` is set (CI decodes it from repository secrets), `app/build.gradle` signs the debug build with that fixed key so updates install over each other; `versionCode` comes from `GITHUB_RUN_NUMBER`. Never commit keystores (`*.jks` is gitignored).
+CI: `.github/workflows/build.yml` runs `assembleDebug` on pushes to `main` (APK uploaded as an artifact) and publishes a GitHub Release for `v*` tags. When `SIGNING_KEYSTORE` is set (CI decodes it from repository secrets), `app/build.gradle` signs the debug build with that fixed key so updates install over each other; `versionCode` is `100 + GITHUB_RUN_NUMBER` (the offset keeps it above the builds from the old private repository, which reached 11; never lower it, or new builds cannot install over old ones). Never commit keystores (`*.jks` is gitignored).
 
 There are no tests in the project yet (no `src/test` or `src/androidTest`, no test dependencies).
 

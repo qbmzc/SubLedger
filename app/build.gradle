@@ -14,7 +14,9 @@ android {
         applicationId 'com.subledger.mobile'
         minSdk 26
         targetSdk 34
-        versionCode((System.getenv('GITHUB_RUN_NUMBER') ?: '1') as int)
+        // 100 + the CI run number: the repository moved to qbmzc/SubLedger, whose run numbers
+        // restarted at 1, while builds from the old repository reached 11.
+        versionCode(100 + ((System.getenv('GITHUB_RUN_NUMBER') ?: '0') as int))
         versionName '0.4.1'
     }
 
