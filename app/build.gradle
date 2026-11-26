@@ -17,7 +17,7 @@ android {
         // 100 + the CI run number: the repository moved to qbmzc/SubLedger, whose run numbers
         // restarted at 1, while builds from the old repository reached 11.
         versionCode(100 + ((System.getenv('GITHUB_RUN_NUMBER') ?: '0') as int))
-        versionName '0.5.0'
+        versionName '0.5.1'
     }
 
     signingConfigs {
@@ -32,11 +32,20 @@ android {
     }
 
     buildTypes {
-        debug {
-            if (ciKeystore) {
-                signingConfig signingConfigs.ci
-            }
+        // CI ships the release build: unlike debug builds it is not debuggable, so `adb run-as`
+        // cannot read the ledger or attachments. Without the CI key (local builds) it is signed
+        // with the debug key, so it still installs.
+        release {
+            signingConfig ciKeystore ? signingConfigs.ci : signingConfigs.debug
         }
+    }
+
+    lint {
+        // Also as text, which CI prints to its log.
+        textReport = true
+        // Not applicable by design (see CLAUDE.md): no AndroidX, UI text is written in code
+        // (Simplified Chinese only), and views are only ever built in code.
+        disable.addAll(['ExifInterface', 'SetTextI18n', 'ViewConstructor'])
     }
 
     compileOptions {

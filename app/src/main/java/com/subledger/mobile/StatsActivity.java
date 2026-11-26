@@ -503,6 +503,8 @@ public final class StatsActivity extends LedgerActivity {
         private final Paint valuePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Path path = new Path();
         private final RectF rect = new RectF();
+        /** Rounded data end, square at the baseline; refilled per draw. */
+        private final float[] barCorners = new float[8];
         private final float density;
         private int selected = -1;
         /** 0→1 while the bars grow in. */
@@ -548,6 +550,7 @@ public final class StatsActivity extends LedgerActivity {
             float slot = width / months.size();
             float barWidth = Math.min(slot * 0.58f, 28 * density);
             float radius = Math.min(6 * density, barWidth / 2);
+            java.util.Arrays.fill(barCorners, 0, 4, radius);
             BigDecimal max = BigDecimal.ZERO;
             int peak = 0;
             for (int i = 0; i < months.size(); i++) {
@@ -574,9 +577,7 @@ public final class StatsActivity extends LedgerActivity {
                 height = Math.max(height, 2 * density);
                 rect.set(center - barWidth / 2, bottom - height, center + barWidth / 2, bottom);
                 path.reset();
-                // Rounded data end, square at the baseline.
-                path.addRoundRect(rect, new float[]{radius, radius, radius, radius, 0, 0, 0, 0},
-                        Path.Direction.CW);
+                path.addRoundRect(rect, barCorners, Path.Direction.CW);
                 barPaint.setAlpha(selected < 0 || selected == i ? 255 : 110);
                 canvas.drawPath(path, barPaint);
                 if (i == (selected < 0 ? peak : selected) && growth >= 1f) {

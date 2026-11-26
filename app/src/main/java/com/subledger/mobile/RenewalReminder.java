@@ -27,8 +27,16 @@ public final class RenewalReminder extends BroadcastReceiver {
     private static final String ACTION = "com.subledger.mobile.RENEWAL_CHECK";
     private static final LocalTime MORNING = LocalTime.of(9, 0);
 
+    /** The manifest's system broadcasts plus this receiver's own alarm. */
+    private static final Set<String> TRIGGERS = new HashSet<>(java.util.Arrays.asList(
+            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED, Intent.ACTION_TIME_CHANGED,
+            Intent.ACTION_TIMEZONE_CHANGED, ACTION));
+
     @Override
     public void onReceive(Context context, Intent intent) {
+        if (!TRIGGERS.contains(intent.getAction())) {
+            return;
+        }
         // Boot, clock changes and the scheduled check all use the same calculation.
         refresh(context);
     }

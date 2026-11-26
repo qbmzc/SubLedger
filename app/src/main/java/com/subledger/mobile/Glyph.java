@@ -7,7 +7,7 @@ import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
-import android.util.LayoutDirection;
+import android.view.View;
 
 /** Small line icons drawn in code on a 24-unit grid, so they take any palette colour. */
 final class Glyph extends Drawable {
@@ -35,7 +35,7 @@ final class Glyph extends Drawable {
         float unit = side / 24f;
         canvas.save();
         canvas.translate(bounds.exactCenterX() - side / 2, bounds.exactCenterY() - side / 2);
-        if (isAutoMirrored() && getLayoutDirection() == LayoutDirection.RTL) {
+        if (isAutoMirrored() && getLayoutDirection() == View.LAYOUT_DIRECTION_RTL) {
             canvas.scale(-1, 1, side / 2, side / 2);
         }
         canvas.scale(unit, unit);

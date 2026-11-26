@@ -14,27 +14,49 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history and tags, for the release notes.
           fetch-depth: 0
 
-      - name: Check tag matches versionName
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Version and APK name
+        id: version
         run: |
-          # The in-app updater compares the release tag with the installed versionName.
           name=$(sed -n "s/^ *versionName '\(.*\)'.*/\1/p" app/build.gradle)
-          if [ "v$name" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match versionName '$name' in app/build.gradle"
-            exit 1
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            # The in-app updater compares the release tag with the installed versionName.
+            if [ "v$name" != "$GITHUB_REF_NAME" ]; then
+              echo "::error::tag $GITHUB_REF_NAME does not match versionName '$name' in app/build.gradle"
+              exit 1
+            fi
+            echo "apk=SubLedger-v$name.apk" >> "$GITHUB_OUTPUT"
+          else
+            echo "apk=SubLedger-v$name-build${{ github.run_number }}.apk" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 17
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Lint
+        run: |
+          chmod +x gradlew
+          status=0
+          ./gradlew :app:lintRelease || status=$?
+          # Every issue, not just the first one Gradle reports.
+          cat app/build/reports/lint-results-release.txt 2>/dev/null || true
+          exit $status
+
+      - name: Upload lint report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: app/build/reports/lint-results-release.html
+          archive: false
+          if-no-files-found: ignore
 
       - name: Decode signing key
         if: github.event_name != 'pull_request'
@@ -44,19 +66,21 @@ jobs:
           echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/subledger.jks"
           echo "SIGNING_KEYSTORE=$RUNNER_TEMP/subledger.jks" >> "$GITHUB_ENV"
 
+      # The release build: not debuggable, signed with the fixed CI key (debug key on pull
+      # requests, which get no secrets).
       - name: Build
         env:
           SIGNING_ALIAS: ${{ secrets.SIGNING_ALIAS }}
           SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
         run: |
-          chmod +x gradlew
-          ./gradlew :app:assembleDebug --stacktrace
-          cp app/build/outputs/apk/debug/app-debug.apk "SubscriptionLedger-${{ github.run_number }}.apk"
+          ./gradlew :app:assembleRelease --stacktrace
+          cp app/build/outputs/apk/release/app-release.apk "${{ steps.version.outputs.apk }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
-          name: SubscriptionLedger-${{ github.run_number }}
-          path: SubscriptionLedger-${{ github.run_number }}.apk
+          path: ${{ steps.version.outputs.apk }}
+          # Uploaded as the APK itself rather than inside a ZIP.
+          archive: false
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -67,5 +91,5 @@ jobs:
           # the update's changes.
           previous=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
           git log --no-merges --format='- %s' ${previous:+"$previous.."}"$GITHUB_REF_NAME" > notes.md
-          gh release create "$GITHUB_REF_NAME" "SubscriptionLedger-${{ github.run_number }}.apk" \
+          gh release create "$GITHUB_REF_NAME" "${{ steps.version.outputs.apk }}" \
             --title "$GITHUB_REF_NAME" --notes-file notes.md
